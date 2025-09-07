@@ -1,6 +1,6 @@
 # jobzAI
 
-An automated job search and analysis system that helps you find and evaluate job opportunities using AI. The system analyzes job postings based on your skills, preferences, and overall fit, then delivers personalized job recommendations via email.
+An automated job search and analysis system implemented using n8n that helps you find and evaluate job opportunities using AI. The system analyzes job postings based on your skills, preferences, and overall fit, then delivers personalized job recommendations via email.
 
 ## Features
 
