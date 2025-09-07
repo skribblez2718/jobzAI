@@ -1,0 +1,1350 @@
+{
+  "name": "Generic Job Searcher",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -3248,
+        544
+      ],
+      "id": "97b970b1-bd8d-434d-974b-4fe573ecede6",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1616,
+        704
+      ],
+      "id": "c45d7ccb-1057-4a93-9ad6-eaf8f0e0a1d2",
+      "name": "Skip Duplicates"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -1360,
+        32
+      ],
+      "id": "43730c9c-b284-4b5d-90fc-bbabfdd6c07c",
+      "name": "Process Job Postings"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "",
+        "needsFallback": true,
+        "options": {
+          "systemMessage": ""
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.1,
+      "position": [
+        -1120,
+        160
+      ],
+      "id": "d9555458-f087-4e95-a009-22854425791c",
+      "name": "Analyze Preference Fit",
+      "retryOnFail": true,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "",
+        "needsFallback": true,
+        "options": {
+          "systemMessage": ""
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.1,
+      "position": [
+        -1136,
+        576
+      ],
+      "id": "87f121cd-1431-4054-85d2-bc8fab1d1e99",
+      "name": "Analyze Skill Fit",
+      "retryOnFail": true,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.output.trim();\n\n// If the text is wrapped in a ```json fenced block, pull the inside; otherwise use it as-is\nconst fencedRE = /```json\\b[^\\n]*\\n([\\s\\S]*?)```/i;\nconst jsonStr  = fencedRE.test(raw) ? fencedRE.exec(raw)[1].trim() : raw;\n\n// Parse and return the JSON object\nreturn [{ json: JSON.parse(jsonStr) }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -720,
+        560
+      ],
+      "id": "6f880bc9-f3e0-4b37-a599-fe21732d3fd2",
+      "name": "Extract Skills Response"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.output.trim();\n\n// If the text is wrapped in a ```json fenced block, pull the inside; otherwise use it as-is\nconst fencedRE = /```json\\b[^\\n]*\\n([\\s\\S]*?)```/i;\nconst jsonStr  = fencedRE.test(raw) ? fencedRE.exec(raw)[1].trim() : raw;\n\n// Parse and return the JSON object\nreturn [{ json: JSON.parse(jsonStr) }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -704,
+        144
+      ],
+      "id": "5e1a7319-d342-4fd0-a98f-d48c0b31dc64",
+      "name": "Extract Preferences Response"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "",
+        "needsFallback": true,
+        "options": {
+          "systemMessage": ""
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.1,
+      "position": [
+        -1136,
+        944
+      ],
+      "id": "1aefb563-b123-4640-b1d1-a464402aa0d8",
+      "name": "Analyze Overall Fit",
+      "retryOnFail": true,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.output.trim();\n\n// If the text is wrapped in a ```json fenced block, pull the inside; otherwise use it as-is\nconst fencedRE = /```json\\b[^\\n]*\\n([\\s\\S]*?)```/i;\nconst jsonStr  = fencedRE.test(raw) ? fencedRE.exec(raw)[1].trim() : raw;\n\n// Parse and return the JSON object\nreturn [{ json: JSON.parse(jsonStr) }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -720,
+        928
+      ],
+      "id": "2709b0c0-da21-4d8b-b8d8-7ad01f48aa1c",
+      "name": "Extract Overall Rating Response"
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.first().json.data.reduce((acc, obj) => {\n  return { ...acc, ...obj }\n})"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -368,
+        1040
+      ],
+      "id": "a3b18647-7420-4300-a6e3-8d9b511f4d9d",
+      "name": "Merge Response Objects"
+    },
+    {
+      "parameters": {
+        "numberInputs": 3
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -368,
+        560
+      ],
+      "id": "a51a3d7f-134a-4f14-803c-2bba5ee7a4cf",
+      "name": "Merge Responses"
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        -368,
+        800
+      ],
+      "id": "67a1c5d1-53c8-4e07-af96-e8cb1f0c4bd3",
+      "name": "Aggregate Responses"
+    },
+    {
+      "parameters": {
+        "jsCode": "const jobPosts = $input.all();\nconst seenJobIds = new Set();\n\nreturn jobPosts.filter(item => {\n  const link = item.json.link;\n  const jobID = link.split(\"-\").pop();\n  if (!seenJobIds.has(jobID)) {\n    seenJobIds.add(jobID);\n    return true; // Keep this job (unique job_id)\n  }\n  return false; // Exclude this job (duplicate job_id)\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2448,
+        544
+      ],
+      "id": "c36e4242-b431-49e8-9d9b-f8d30ef6354c",
+      "name": "De-duplicate Job Posts"
+    },
+    {
+      "parameters": {
+        "jsCode": "const existingJobIds = $input.all().map(i => i.json.job_id);\n\nreturn $('De-duplicate Job Posts').all().filter(item => {\n  const link = item.json.link;\n  const jobID = link.split(\"-\").pop();\n  return !existingJobIds.includes(jobID)\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2032,
+        544
+      ],
+      "id": "45f5badc-7df9-4f6d-88a9-c26ac7268d77",
+      "name": "De-duplicate Jobs in DB"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -1360,
+        576
+      ],
+      "id": "23810746-1106-4266-9d79-f7963bcd002f",
+      "name": "Wait Before Skill Rating",
+      "webhookId": "a0ed0872-de2c-4188-adeb-c0356cbd54c6"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -1360,
+        944
+      ],
+      "id": "27dad90c-dbfd-4c7e-9579-f0b9075977aa",
+      "name": "Wait Before Overall Rating",
+      "webhookId": "a0ed0872-de2c-4188-adeb-c0356cbd54c6"
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "job_applications",
+          "mode": "list",
+          "cachedResultName": "job_applications"
+        },
+        "returnAll": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -1120,
+        -112
+      ],
+      "id": "70ddcfcd-64c9-48cd-9ed8-fdd8471a93f0",
+      "name": "Select Top Jobs",
+      "executeOnce": true,
+      "credentials": {
+        "postgres": {
+          "id": "WiAat3A2YqYSpreG",
+          "name": "Job Search DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "job_applications",
+          "mode": "list",
+          "cachedResultName": "job_applications"
+        },
+        "returnAll": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -2240,
+        544
+      ],
+      "id": "7572189c-2e17-46e7-8568-6a2dcc1d5f24",
+      "name": "Select All Jobs",
+      "alwaysOutputData": true,
+      "executeOnce": true,
+      "credentials": {
+        "postgres": {
+          "id": "WiAat3A2YqYSpreG",
+          "name": "Job Search DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "51d5da04-9cd8-4475-ab0d-158bc8581b9d",
+              "leftValue": "={{ $json.overall_score }}",
+              "rightValue": 3,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -352,
+        1264
+      ],
+      "id": "daee01c4-6e24-4006-8b24-7e92ae3e29cf",
+      "name": "If Overall Score >= 3.0"
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "job_applications",
+          "mode": "list",
+          "cachedResultName": "job_applications"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "preferences_rating": "={{ $json.preferences_rating }}",
+            "skill_rating": "={{ $json.skill_rating }}",
+            "overall_rating": "={{ $json.overall_score }}",
+            "job_id": "={{ $json.job_id }}",
+            "company_name": "={{ $json.company_name }}",
+            "position": "={{ $json.position }}",
+            "salary": "={{ $json.salary }}",
+            "location": "={{ $json.location }}",
+            "posted_date": "={{ $json.posted_date }}",
+            "preference_matches": "={{ $json.preference_matches.join(\"[END_OF_BULLET]\") }}",
+            "preference_misses": "={{ $json.preference_misses.join(\"[END_OF_BULLET]\") }}",
+            "potential_preference_matches": "={{ $json.potential_preference_matches.join(\"[END_OF_BULLET]\") }}",
+            "preference_references": "={{ $json.references.join(\"[END_OF_BULLET]\") }}",
+            "skill_matches": "={{ $json.skill_matches.join(\"[END_OF_BULLET]\") }}",
+            "skill_misses": "={{ $json.skill_misses.join(\"[END_OF_BULLET]\") }}",
+            "skill_translations": "={{ $json.skill_translations.join(\"[END_OF_BULLET]\") }}",
+            "years_of_experience": "={{ $json.years_of_experience }}",
+            "evaluation": "={{ $json.explanation }}",
+            "joburl": "={{ $json.job_url }}"
+          },
+          "matchingColumns": [
+            "job_id"
+          ],
+          "schema": [
+            {
+              "id": "job_id",
+              "displayName": "job_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "company_name",
+              "displayName": "company_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "position",
+              "displayName": "position",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "salary",
+              "displayName": "salary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "location",
+              "displayName": "location",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "posted_date",
+              "displayName": "posted_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "preference_matches",
+              "displayName": "preference_matches",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "preference_misses",
+              "displayName": "preference_misses",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "potential_preference_matches",
+              "displayName": "potential_preference_matches",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "preferences_rating",
+              "displayName": "preferences_rating",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "preference_references",
+              "displayName": "preference_references",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "skill_matches",
+              "displayName": "skill_matches",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "skill_misses",
+              "displayName": "skill_misses",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "skill_translations",
+              "displayName": "skill_translations",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "skill_rating",
+              "displayName": "skill_rating",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "years_of_experience",
+              "displayName": "years_of_experience",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "evaluation",
+              "displayName": "evaluation",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "resume",
+              "displayName": "resume",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "joburl",
+              "displayName": "joburl",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "overall_rating",
+              "displayName": "overall_rating",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -128,
+        1248
+      ],
+      "id": "d46ead2b-a573-46b3-8bc2-788c3aac53ea",
+      "name": "Insert Job",
+      "credentials": {
+        "postgres": {
+          "id": "WiAat3A2YqYSpreG",
+          "name": "Job Search DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "4baf629c-0dea-452d-afa3-872240f45f8a",
+              "leftValue": "={{ $input.all() }}",
+              "rightValue": "",
+              "operator": {
+                "type": "array",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -704,
+        -112
+      ],
+      "id": "aca735ca-c0f4-4c7a-8dab-a4dd6a6f8b77",
+      "name": "If New Jobs Found"
+    },
+    {
+      "parameters": {
+        "jsCode": "let emailHTMLContent = `<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"UTF-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n  <title>Top Job Picks</title>\n  <style>\n        body {\n      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;\n      background-color: #f4f7fa;\n      color: #000000;\n      line-height: 1.6;\n      margin: 0;\n      padding: 20px;\n    }\n    .container {\n      width: auto;\n      margin: 0 auto;\n      background: #ffffff;\n      border-radius: 12px;\n      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);\n      padding: 24px;\n    }\n    h1 {\n      font-size: 24px;\n      font-weight: 600;\n      color: #000000;\n      text-align: center;\n      margin-bottom: 24px;\n    }\n    .card {\n      border: 2px solid #a0aec0;\n      border-radius: 10px;\n      padding: 16px;\n      margin-bottom: 20px;\n      background: #f7fafc;\n      box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);\n    }\n    .card-header {\n      display: flex;\n      justify-content: space-between;\n      align-items: center;\n      margin-bottom: 16px;\n      gap: 16px;\n    }\n    .card-header h2 {\n      font-size: 18px;\n      font-weight: 600;\n      color: #000000;\n    }\n    .job-info {\n      display: grid;\n      grid-template-columns: 1fr 1fr;\n      grid-template-rows: repeat(3, auto);\n      row-gap: 8px;\n      column-gap: 16px;\n      margin-bottom: 16px;\n    }\n    .job-info span:nth-child(1) {\n      grid-row: 1;\n      grid-column: 1;\n    }\n    .job-info span:nth-child(2) {\n      grid-row: 2;\n      grid-column: 1;\n    }\n    .job-info span:nth-child(3) {\n      grid-row: 3;\n      grid-column: 1;\n    }\n    .job-info span:nth-child(4) {\n      grid-row: 1;\n      grid-column: 2;\n    }\n    .job-info span:nth-child(5) {\n      grid-row: 2;\n      grid-column: 2;\n    }\n    .job-info span {\n      font-size: 14px;\n      color: #000000;\n    }\n    .button {\n      display: inline-block;\n      padding: 8px 8px;\n      margin-top: 15px;\n      margin-left: 25px;\n      background-color: #3182ce;\n      color: #ffffff !important;\n      text-decoration: none !important;\n      border-radius: 6px;\n      font-size: 14px;\n      font-weight: 700;\n    }\n    .ratings-table {\n      width: 100%;\n      border-collapse: collapse;\n      margin-bottom: 16px;\n    }\n    .ratings-table th, .ratings-table td {\n      padding: 8px;\n      text-align: left;\n      border-bottom: 1px solid #e2e8f0;\n      font-size: 14px;\n      color: #000000;\n    }\n    .ratings-table th {\n      background-color: #edf2f7;\n      font-weight: 600;\n      color: #000000;\n    }\n    .section {\n      margin-bottom: 16px;\n    }\n    .section h3 {\n      font-size: 14px;\n      font-weight: 600;\n      color: #000000;\n      margin-bottom: 8px;\n    }\n    ul {\n      margin: 0;\n      padding-left: 20px;\n      list-style-type: disc;\n      font-size: 14px;\n      color: #000000;\n    }\n    ul li {\n      margin-bottom: 8px;\n    }\n    .subheading {\n      font-weight: 600;\n      font-size: 14px;\n      color: #000000;\n      margin-top: 12px;\n      margin-bottom: 8px;\n    }\n    @media (max-width: 600px) {\n      .container {\n        padding: 16px;\n      }\n      .card {\n        padding: 12px;\n      }\n      .card-header h2 {\n        font-size: 16px;\n      }\n      .ratings-table th, .ratings-table td {\n        font-size: 12px;\n        padding: 6px;\n      }\n      .job-info {\n        display: flex;\n        flex-direction: column;\n        gap: 8px;\n      }\n      .job-info span, ul, .section h3 {\n        font-size: 12px;\n      }\n    }\n  </style>\n</head>\n<body>\n  <div class=\"container\">\n    <h1>Top Job Picks</h1>`;\n\n$input.all().forEach((item) => {\n  emailHTMLContent += `<div class=\"card\">\n      <div class=\"card-header\">\n        <h2>Job ID: ${item.json.job_id}</h2>\n        <a href=\"${item.json.joburl}\" class=\"button\">View Job Posting</a>\n      </div>\n      <div class=\"job-info\">\n        <span><strong>Position:</strong> ${item.json.position}</span>\n        <span><strong>Company:</strong> ${item.json.company_name}</span>\n        <span><strong>Location:</strong> ${item.json.location}</span>\n        <span><strong>Salary:</strong> ${item.json.salary}</span>\n        <span><strong>Posted:</strong> ${item.json.posted_date}</span>\n      </div>\n      <table class=\"ratings-table\">\n        <thead>\n          <tr>\n            <th>Overall Rating</th>\n            <th>Preference Match Rating</th>\n            <th>Skill Match Rating</th>\n            <th>Explanation</th>\n          </tr>\n        </thead>\n        <tbody>\n          <tr>\n            <td>${item.json.overall_rating}</td>\n            <td>${item.json.preferences_rating}</td>\n            <td>${item.json.skill_rating}</td>\n            <td>${item.json.evaluation}</td>\n          </tr>\n        </tbody>\n      </table>\n      <div class=\"section\">\n        <h3>Preference Matches</h3>\n        <ul>\n          ${ (item.json.preference_matches && item.json.preference_matches.length > 0) ? item.json.preference_matches.split('[END_OF_BULLET]').map((li) => `<li>${li.trim()}</li>`).join('') : `<li>No preference matches</li>` }\n        </ul>\n        <div class=\"subheading\">References</div>\n        <ul>\n          ${ (item.json.preference_references && item.json.preference_references.length > 0) ? item.json.preference_references.split('[END_OF_BULLET]').map((li) => `<li>${li.trim()}</li>`).join('') : `<li>No preference references</li>` }\n        </ul>\n      </div>\n      <div class=\"section\">\n        <h3>Preference Misses</h3>\n        <ul>\n          ${ (item.json.preference_misses && item.json.preference_misses.length > 0) ? item.json.preference_misses.split('[END_OF_BULLET]').map((li) => `<li>${li.trim()}</li>`).join('') : `<li>No preference misses</li>` }\n        </ul>\n      </div>\n      <div class=\"section\">\n        <h3>Preference Translations</h3>\n        <ul>\n          ${ (item.json.potential_preference_matches && item.json.potential_preference_matches.length > 0) ? item.json.potential_preference_matches.split('[END_OF_BULLET]').map((li) => `<li>${li.trim()}</li>`).join('') : `<li>No preference translations</li>` }\n        </ul>\n      </div>\n      <div class=\"section\">\n        <h3>Skill Matches</h3>\n        <ul>\n          ${ (item.json.skill_matches && item.json.skill_matches.length > 0) ? item.json.skill_matches.split('[END_OF_BULLET]').map((li) => `<li>${li.trim()}</li>`).join('') : `<li>No skill matches</li>` }\n        </ul>\n      </div>\n      <div class=\"section\">\n        <h3>Skill Misses</h3>\n        <ul>\n          ${ (item.json.skill_misses && item.json.skill_misses.length > 0) ? item.json.skill_misses.split('[END_OF_BULLET]').map((li) => `<li>${li.trim()}</li>`).join('') : `<li>No skill misses</li>` }\n        </ul>\n      </div>\n      <div class=\"section\">\n        <h3>Skill Translations</h3>\n        <ul>\n          ${ (item.json.skill_translations && item.json.skill_translations.length > 0) ? item.json.skill_translations.split('[END_OF_BULLET]').map((li) => `<li>${li.trim()}</li>`).join('') : `<li>No skill translations</li>` }\n        </ul>\n      </div>\n    </div>`;\n});\n\nemailHTMLContent += `  </div>\n</body>\n</html>`;\n\nreturn {\"output\": emailHTMLContent}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -448,
+        -256
+      ],
+      "id": "785427f5-2074-4ee7-b71e-773565026396",
+      "name": "Generate Jobs Email HTML"
+    },
+    {
+      "parameters": {
+        "fromEmail": "some.email@email.com",
+        "toEmail": "some.email@email.com",
+        "subject": "Job Search Report",
+        "html": "={{ $json.output }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        -208,
+        -256
+      ],
+      "id": "cdce7f7d-5b98-49e6-9b5b-d7c6f0bab7c7",
+      "name": "Send Jobs Email",
+      "webhookId": "c23f572c-df93-43b6-b439-c9871a61ccd9",
+      "credentials": {
+        "smtp": {
+          "id": "GKc9INRZ3yteqg9r",
+          "name": "Gmail App"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "some.email@email.com",
+        "toEmail": "some.email@email.com",
+        "subject": "No New Jobs Found",
+        "html": "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"UTF-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n  <title>No New Jobs Found</title>\n  <style>\n    body {\n      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;\n      background-color: #f4f7fa;\n      color: #333333;\n      line-height: 1.6;\n      margin: 0;\n      padding: 20px;\n    }\n    .container {\n      max-width: 600px;\n      margin: 0 auto;\n      background: #ffffff;\n      border-radius: 12px;\n      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);\n      padding: 32px;\n      text-align: center;\n    }\n    h1 {\n      font-size: 24px;\n      font-weight: 600;\n      color: #1a202c;\n      margin-bottom: 16px;\n    }\n    p {\n      font-size: 16px;\n      color: #4a5568;\n      margin-bottom: 24px;\n    }\n    .icon {\n      display: inline-block;\n      margin-bottom: 24px;\n    }\n    .icon svg {\n      width: 64px;\n      height: 64px;\n      fill: #a0aec0;\n    }\n    .footer {\n      margin-top: 32px;\n      font-size: 14px;\n      color: #718096;\n    }\n    @media (max-width: 600px) {\n      .container {\n        padding: 24px;\n      }\n      h1 {\n        font-size: 20px;\n      }\n      p {\n        font-size: 14px;\n      }\n      .button {\n        font-size: 14px;\n        padding: 8px 16px;\n      }\n      .icon svg {\n        width: 48px;\n        height: 48px;\n      }\n    }\n  </style>\n</head>\n<body>\n  <div class=\"container\">\n    <div class=\"icon\">\n      <svg viewBox=\"0 0 24 24\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n        <path d=\"M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z\" stroke=\"#a0aec0\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>\n      </svg>\n    </div>\n    <h1>No New Jobs Found Today</h1>\n    <p>We looked for new opportunities matching your job search, but it seems there aren't any fresh postings today. Don't worry—we'll keep searching and let you know as soon as we find something that fits!</p>\n</body>\n</html>",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        -448,
+        0
+      ],
+      "id": "3da536b8-0b39-4bf2-962a-047257cb60e9",
+      "name": "Send No New Jobs Email",
+      "webhookId": "72a022fd-9042-4c10-87ec-0be7b16e632c",
+      "credentials": {
+        "smtp": {
+          "id": "GKc9INRZ3yteqg9r",
+          "name": "Gmail App"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "6bd9c305-9b05-44c4-b89b-452095a5f9d9",
+              "leftValue": "={{ $input.all() }}",
+              "rightValue": "",
+              "operator": {
+                "type": "array",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1840,
+        544
+      ],
+      "id": "6e4ebd73-02d4-44fb-aa64-5e16520e9c28",
+      "name": "If New Jobs"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Helper: extract LinkedIn job id from an object/json that may have job_id, job_url, or link\nfunction extractIdFromJson(j) {\n  if (!j) return null;\n  if (j.job_id != null) return String(j.job_id);\n  const url = String(j.job_url || j.link || '');\n  const m = url.match(/-(\\d{6,})(?:[/?#].*)?$/); // last hyphen-number at end\n  return m ? m[1] : null;\n}\n\n// 1) Build the set of \"new this run\" IDs from the RSS items\nconst newIds = new Set(\n  $('De-duplicate Jobs in DB').all()\n    .map(i => extractIdFromJson(i.json))\n    .filter(Boolean)\n);\n\n// 2) Filter the DB rows (Select Top Jobs) to only those IDs\nconst rows = $input.all(); // coming from \"Select Top Jobs\"\nconst out = rows.filter(r => {\n  const id = extractIdFromJson(r.json);\n  console.log(r.json.overall_rating)\n  return id && newIds.has(id);\n});\n\n// 3) Debug if empty so you can see why\n/*if (out.length === 0) {\n  console.log('Extract New Jobs debug:', {\n    dedupCount: $('De-duplicate Jobs in DB').all().length,\n    selectTopCount: rows.length,\n    newIdsSample: Array.from(newIds).slice(0, 5),\n    firstSelectTopRow: rows[0]?.json\n  });\n}*/\n\nconsole.log('ids in Select Top Jobs (first 10):',\n  $input.all().map(r => r.json.job_id).slice(0, 10)\n);\nconsole.log('intersection size:',\n  $input.all().reduce((c, r) => c + (newIds.has(String(r.json.job_id)) ? 1 : 0), 0)\n);\n\n\nreturn out;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -912,
+        -112
+      ],
+      "id": "1d2c12d4-b1af-4dec-8362-1c4266a4f51e",
+      "name": "Extract New Jobs",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "numberInputs": 5
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -2672,
+        496
+      ],
+      "id": "a40c7d2a-d891-4267-8548-b549269c82fe",
+      "name": "Merge Job Postings"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-oss:latest",
+          "mode": "list",
+          "cachedResultName": "gpt-oss:latest"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -1072,
+        368
+      ],
+      "id": "1d6ea9e7-3229-4f32-82f7-0961f68ed72e",
+      "name": "Analyze Performance Fit Model (gpt-oss)",
+      "credentials": {
+        "openAiApi": {
+          "id": "wXsZF7z43ONJsH5F",
+          "name": "OpenAI Credentials"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "grok-3",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatXAiGrok",
+      "typeVersion": 1,
+      "position": [
+        -1232,
+        368
+      ],
+      "id": "b67bc2b7-224b-473a-859d-12149d0ca018",
+      "name": "Analyze Performance Fit Model",
+      "credentials": {
+        "xAiApi": {
+          "id": "MYDSzWgEmJ7cPz45",
+          "name": "xAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-oss:latest",
+          "mode": "list",
+          "cachedResultName": "gpt-oss:latest"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -1088,
+        784
+      ],
+      "id": "1e7a515e-fcc6-4754-afc1-d13359631d0e",
+      "name": "Analyze Skill Fit Model (gpt-oss)",
+      "credentials": {
+        "openAiApi": {
+          "id": "wXsZF7z43ONJsH5F",
+          "name": "OpenAI Credentials"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "grok-3",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatXAiGrok",
+      "typeVersion": 1,
+      "position": [
+        -1248,
+        784
+      ],
+      "id": "da6afaff-5253-4fd3-b74c-2f70705cfa68",
+      "name": "Analyze Skill Fit Model",
+      "credentials": {
+        "xAiApi": {
+          "id": "MYDSzWgEmJ7cPz45",
+          "name": "xAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-oss:latest",
+          "mode": "list",
+          "cachedResultName": "gpt-oss:latest"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -1088,
+        1152
+      ],
+      "id": "5e1c12df-25fa-4893-823f-efa6a358e1bd",
+      "name": "Analyze Overall Fit Model (gpt-oss)",
+      "credentials": {
+        "openAiApi": {
+          "id": "wXsZF7z43ONJsH5F",
+          "name": "OpenAI Credentials"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "grok-3",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatXAiGrok",
+      "typeVersion": 1,
+      "position": [
+        -1248,
+        1152
+      ],
+      "id": "220a0bef-52cc-4b2c-a196-c97aa4817d79",
+      "name": "Analyze Overall Fit Model",
+      "credentials": {
+        "xAiApi": {
+          "id": "MYDSzWgEmJ7cPz45",
+          "name": "xAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://rss.app/feeds/",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        -2944,
+        352
+      ],
+      "id": "6285b316-5c81-4281-96cb-143cd3e1849c",
+      "name": "Read [Job Title] Jobs I"
+    },
+    {
+      "parameters": {
+        "url": "https://rss.app/feeds/",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        -2944,
+        544
+      ],
+      "id": "381a937b-b1f4-4ba5-a111-cb0a99cc2763",
+      "name": "Read [Job Title] Jobs II"
+    },
+    {
+      "parameters": {
+        "url": "https://rss.app/feeds/",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        -2944,
+        752
+      ],
+      "id": "0c3ad58d-4f29-4f47-b597-b61427891bde",
+      "name": "Read [Job Title] Jobs III"
+    },
+    {
+      "parameters": {
+        "content": "## LinkedIn RSS Feeds by Job Title\n\n- Perform a job search on LinkedIn\n- Copy the URL\n- Create an RSS feed in rss.app and place the URL in the node\n- You may have as many of these nodes as you want ",
+        "height": 896,
+        "width": 224
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -3008,
+        16
+      ],
+      "id": "1733d1ee-268c-49d6-9551-d7d50075d919",
+      "name": "Sticky Note"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Read [Job Title] Jobs II",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Read [Job Title] Jobs I",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Read [Job Title] Jobs III",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Job Postings": {
+      "main": [
+        [
+          {
+            "node": "Select Top Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Analyze Preference Fit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Preference Fit": {
+      "main": [
+        [
+          {
+            "node": "Extract Preferences Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Skill Fit": {
+      "main": [
+        [
+          {
+            "node": "Extract Skills Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Skills Response": {
+      "main": [
+        [
+          {
+            "node": "Wait Before Overall Rating",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge Responses",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Extract Preferences Response": {
+      "main": [
+        [
+          {
+            "node": "Wait Before Skill Rating",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge Responses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Overall Fit": {
+      "main": [
+        [
+          {
+            "node": "Extract Overall Rating Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Overall Rating Response": {
+      "main": [
+        [
+          {
+            "node": "Merge Responses",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Merge Response Objects": {
+      "main": [
+        [
+          {
+            "node": "If Overall Score >= 3.0",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Responses": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Responses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Responses": {
+      "main": [
+        [
+          {
+            "node": "Merge Response Objects",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "De-duplicate Job Posts": {
+      "main": [
+        [
+          {
+            "node": "Select All Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "De-duplicate Jobs in DB": {
+      "main": [
+        [
+          {
+            "node": "If New Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait Before Skill Rating": {
+      "main": [
+        [
+          {
+            "node": "Analyze Skill Fit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait Before Overall Rating": {
+      "main": [
+        [
+          {
+            "node": "Analyze Overall Fit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select Top Jobs": {
+      "main": [
+        [
+          {
+            "node": "Extract New Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select All Jobs": {
+      "main": [
+        [
+          {
+            "node": "De-duplicate Jobs in DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Overall Score >= 3.0": {
+      "main": [
+        [
+          {
+            "node": "Insert Job",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Process Job Postings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Job": {
+      "main": [
+        [
+          {
+            "node": "Process Job Postings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If New Jobs Found": {
+      "main": [
+        [
+          {
+            "node": "Generate Jobs Email HTML",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send No New Jobs Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Jobs Email HTML": {
+      "main": [
+        [
+          {
+            "node": "Send Jobs Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If New Jobs": {
+      "main": [
+        [
+          {
+            "node": "Process Job Postings",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip Duplicates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract New Jobs": {
+      "main": [
+        [
+          {
+            "node": "If New Jobs Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Job Postings": {
+      "main": [
+        [
+          {
+            "node": "De-duplicate Job Posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Performance Fit Model (gpt-oss)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Analyze Preference Fit",
+            "type": "ai_languageModel",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Analyze Performance Fit Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Analyze Preference Fit",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Skill Fit Model (gpt-oss)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Analyze Skill Fit",
+            "type": "ai_languageModel",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Analyze Skill Fit Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Analyze Skill Fit",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Overall Fit Model (gpt-oss)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Analyze Overall Fit",
+            "type": "ai_languageModel",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Analyze Overall Fit Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Analyze Overall Fit",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read [Job Title] Jobs I": {
+      "main": [
+        [
+          {
+            "node": "Merge Job Postings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read [Job Title] Jobs II": {
+      "main": [
+        [
+          {
+            "node": "Merge Job Postings",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Read [Job Title] Jobs III": {
+      "main": [
+        [
+          {
+            "node": "Merge Job Postings",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "ce800788-00bd-43cc-9d27-4fee7d1e79c8",
+  "meta": {
+    "instanceId": "c9ea3213e73f28e6714bfef9a7bc189d41cc16c4f1365d629d6db736740a2d7d"
+  },
+  "id": "sU0M2EHP2j3EWNwv",
+  "tags": []
+}
