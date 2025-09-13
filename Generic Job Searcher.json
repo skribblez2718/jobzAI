@@ -245,6 +245,14 @@
           "cachedResultName": "job_applications"
         },
         "returnAll": true,
+        "sort": {
+          "values": [
+            {
+              "column": "overall_rating",
+              "direction": "DESC"
+            }
+          ]
+        },
         "options": {}
       },
       "type": "n8n-nodes-base.postgres",
