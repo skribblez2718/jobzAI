@@ -2,6 +2,9 @@
 
 An automated job search and analysis system implemented using n8n that helps you find and evaluate job opportunities using AI. The system analyzes job postings based on your skills, preferences, and overall fit, then delivers personalized job recommendations via email.
 
+![JobzAI Workflow Overview](img/flow_overview.png)
+*Figure 1: JobzAI Workflow Overview*
+
 ## Features
 
 - **Automated Job Collection**: Fetches job postings from LinkedIn via RSS feeds. Can be extended via customization
@@ -11,6 +14,9 @@ An automated job search and analysis system implemented using n8n that helps you
   - Overall fit
 - **Deduplication**: Prevents duplicate job notifications
 - **Email Notifications**: Delivers personalized job recommendations
+
+![Example Job Recommendation Email](img/example_email.png)
+*Figure 2: Example Job Recommendation Email*
 
 ## Prerequisites
 
@@ -45,6 +51,8 @@ An automated job search and analysis system implemented using n8n that helps you
 ### 2. Database Setup
 
 1. Create a new PostgreSQL database
+   - Execute the postgres/create_cluster.sh script (may not be explicitly required depending on your setup)
+   - Execute the postgres/bootstrap_db.sql script to setup the database
 2. Note the following details:
    - Host
    - Port
@@ -103,7 +111,8 @@ The system uses several prompts for analysis. Customize these in the `prompts/` 
 
 1. **Initial Setup**:
    - Configure all nodes in the n8n workflow
-   - Test the workflow manually first node by node, pinning data as you go
+   - Trigger the workflow
+      - Not required, but it is recommended to test the flow node by node pinning data as you go on initial run, especially if you made customizations to the flow. Once functioning is confirmed, unpin data and run a snormal
 
 2. **Scheduling**:
    - Optionally add a Schedule trigger node to run the workflow on a schedule
