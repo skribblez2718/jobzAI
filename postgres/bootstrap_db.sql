@@ -49,8 +49,17 @@ CREATE TABLE public.job_applications (
     years_of_experience         TEXT,
     evaluation                  TEXT,
     resume                      TEXT,
-    joburl                      TEXT
+    joburl                      TEXT,
+    -- Dimension scores (1-5 scale from enhanced scoring algorithm)
+    dim_employee_satisfaction   DOUBLE PRECISION,
+    dim_salary_competitiveness  DOUBLE PRECISION,
+    dim_remote_work_flexibility DOUBLE PRECISION,
+    dim_skills_alignment        DOUBLE PRECISION,
+    dim_cultural_fit            DOUBLE PRECISION
 );
+
+-- NOTE: The 'resume' column is currently unused by the n8n flow but retained for
+-- future use (e.g., storing customized resumes per application).
 -- Give role exactly what it needs on this table + its sequence
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE     public.job_applications       TO <YOUR_ROLE>;
 GRANT USAGE,  SELECT                ON SEQUENCE  job_applications_id_seq        TO <YOUR_ROLE>;

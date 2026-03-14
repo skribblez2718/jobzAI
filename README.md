@@ -91,21 +91,22 @@ An automated job search and analysis system implemented using n8n that helps you
 
 The system uses several prompts for analysis. Customize these in the `prompts/` directory:
 
-### 1. Preference Analysis
-- File: prompts/system/analyze_preference_fit.md
-- Replace placeholders with your job preferences
+### Placeholders to Replace
 
-### 2. Skill Analysis
-- File: prompts/user/analyze_skills.md
-- Add your resume in markdown format
+Before running the workflow, replace these placeholders with your actual information:
 
-### 3. Overall Fit Analysis
-- File: prompts/system/analyze_overall_fit.md
+#### In `prompts/system/analyze_preference_fit.md`:
+- `[ROLE_LOCATION_PREFERENCES]` - Your preferred work locations (e.g., "Remote US, Nashville, Austin")
+- `[CITY_PREFERENCES]` - Specific cities you'd consider for hybrid/on-site roles
+- `[YOUR_PREFERENCE_CRITERIA]` - Your personal preference criteria for evaluating job fit (e.g., "Stakeholder Engagement, Building Pipelines, Team Collaboration")
 
-### 4. Other Prompts
+#### In `prompts/user/analyze_skills.md`:
+- `[YOUR_RESUME_IN_MARKDOWN]` - Your resume formatted in markdown
+
+### Other Prompts
 - Review and customize other prompts as desired:
-    - system prompts are locate din prompts/system/
-    - user prompts are located in prompts/user/
+    - System prompts are located in `prompts/system/`
+    - User prompts are located in `prompts/user/`
 
 ## Usage
 
@@ -124,6 +125,71 @@ The system uses several prompts for analysis. Customize these in the `prompts/` 
      - Match scores (skills, preferences, overall)
      - Key reasons for the match
      - Direct link to apply
+
+## Database Schema
+
+The PostgreSQL database uses a single `job_applications` table with the following structure:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `job_id` | TEXT (PK) | Unique job identifier |
+| `company_name` | TEXT | Company name |
+| `position` | TEXT | Job position/title |
+| `salary` | TEXT | Salary information |
+| `location` | TEXT | Job location |
+| `posted_date` | TEXT | Date job was posted |
+| `preference_matches` | TEXT | Matched preferences |
+| `preference_misses` | TEXT | Missed preferences |
+| `potential_preference_matches` | TEXT | Potential matches |
+| `preferences_rating` | DOUBLE PRECISION | Preference fit score (0-5) |
+| `preference_references` | TEXT | Research references |
+| `skill_matches` | TEXT | Matched skills |
+| `skill_misses` | TEXT | Missing skills |
+| `skill_translations` | TEXT | Transferable skills |
+| `skill_rating` | DOUBLE PRECISION | Skill fit score (1-5) |
+| `overall_rating` | DOUBLE PRECISION | Overall fit score |
+| `years_of_experience` | TEXT | Experience requirements |
+| `evaluation` | TEXT | Final determination text |
+| `resume` | TEXT | Reserved for future use |
+| `joburl` | TEXT | Link to job posting |
+| `dim_employee_satisfaction` | DOUBLE PRECISION | Employee satisfaction score (1-5) |
+| `dim_salary_competitiveness` | DOUBLE PRECISION | Salary competitiveness score (1-5) |
+| `dim_remote_work_flexibility` | DOUBLE PRECISION | Remote flexibility score (1-5) |
+| `dim_skills_alignment` | DOUBLE PRECISION | Skills alignment score (1-5) |
+| `dim_cultural_fit` | DOUBLE PRECISION | Cultural fit score (1-5) |
+
+See `postgres/bootstrap_db.sql` for the complete schema definition.
+
+## Workflow Configuration
+
+The n8n workflow (`Generic Job Searcher.json`) contains prompts embedded directly in the nodes. You must customize these before use:
+
+### RSS Feed Nodes
+- `[RSS_FEED_URL]` - Replace with your LinkedIn RSS feed URL from rss.app (in "RSS Feed 1" and "RSS Feed 2" nodes)
+
+### Email Nodes
+- `[YOUR_EMAIL]` - Your email address (in "Send Jobs Email" and "Send No New Jobs Email" nodes)
+- `[CREDENTIAL_ID]` - Your n8n SMTP credential ID for email sending
+- `[SMTP_CREDENTIAL_NAME]` - Name of your SMTP credential in n8n
+
+### Preference Analysis Node
+The "Analyze Preference Fit" node contains an embedded system prompt with these placeholders:
+- `[CURRENT_DATE]` - Current date for context
+- `[ROLE_LOCATION_PREFERENCES]` - Your preferred work locations
+- `[YOUR_PREFERENCE_CRITERIA]` - Your specific preference criteria (e.g., team culture, growth opportunities, domain alignment)
+
+### Skill Analysis Node
+The "Analyze Skill Fit" node contains a resume template in the user prompt. Replace with your actual resume in markdown format.
+
+### Overall Fit Analysis Node
+The "Analyze Overall Fit" node's user prompt contains:
+- `[YOUR_PREFERENCES]` - Brief description of your job preferences
+
+### Tavily Search Node
+- `[CREDENTIAL_ID]` - Your Tavily API credential ID
+
+### Database Credentials
+- Configure PostgreSQL credentials in the database nodes
 
 ## Customization
 - **Overall Score Cutoff**: The overall score cutoff is set to 3. That is, only jobs rated 3 or above will be emailed. You may adjust this in the If Overall Score >= 3 node
