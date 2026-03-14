@@ -1,4 +1,4 @@
-I have been looking for a new role. One that fits both my personal preferences such as being [YOUR_PREFERENCES] etc. , as well as ensure my skills are also a good fit for the role. The following is analysis of the role as it fits each of these criteria:
+I have been looking for a new role that fits both my personal preferences and skill set. The following is analysis of the role as it fits each of these criteria:
 
 # Preference
 ## Preference Matches
@@ -7,7 +7,7 @@ I have been looking for a new role. One that fits both my personal preferences s
 {{ $('Extract Preferences Response').item.json.preference_misses }}
 ## Potential Preference Matches
 {{ $('Extract Preferences Response').item.json.potential_preference_matches }}
-### Preferences Rating: {{ $('Extract Preferences Response').item.json.preferences_rating }} 
+### Preferences Rating: {{ $('Extract Preferences Response').item.json.preferences_rating }}
 
 # Skills
 ## Skill Matches
@@ -20,3 +20,7 @@ I have been looking for a new role. One that fits both my personal preferences s
 - {{ $json.skill_translations.join("\n- ") }}
 
 ### Skills Rating: {{ $json.skill_rating }}
+
+---
+
+Synthesize the above analysis into a final determination using the weighted scoring framework defined in your instructions.
