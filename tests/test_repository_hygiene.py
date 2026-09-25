@@ -139,6 +139,10 @@ class RepositoryHygieneTests(unittest.TestCase):
         self.assertNotIn("${{ secrets.", workflow)
         self.assertIn("persist-credentials: false", workflow)
         self.assertIn("fetch-depth: 0", workflow)
+        self.assertIn(
+            "BASE_REF: ${{ github.event.forced && github.event.after || '' }}",
+            workflow,
+        )
         self.assertIn('GITLEAKS_ENABLE_COMMENTS: "false"', workflow)
         self.assertIn('GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"', workflow)
         self.assertTrue(uses, "CI workflow must use pinned actions")

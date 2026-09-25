@@ -49,6 +49,10 @@ jobs:
         uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          # On a force-push, the action's default base commit may have no parent
+          # in the rewritten history. Scan the new HEAD rather than constructing
+          # an invalid BASE_REF^..HEAD range; normal pushes retain the default range.
+          BASE_REF: ${{ github.event.forced && github.event.after || '' }}
           GITLEAKS_ENABLE_COMMENTS: "false"
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
           GITLEAKS_ENABLE_SUMMARY: "false"
