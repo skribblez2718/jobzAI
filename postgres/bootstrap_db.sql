@@ -1,69 +1,67 @@
 --------------------------------------------------------------------
--- bootstrap.sql  (PostgreSQL ≥ 12)
--- Run as a super-user:   psql -f bootstrap.sql
+-- jobzAI schema bootstrap (PostgreSQL 12+)
+--
+-- Fresh install: before running this file, have the owner of schema public (or
+-- a database administrator) revoke CREATE on public from PUBLIC and grant
+-- USAGE, CREATE on public to the schema-owner/migration role. Run this file as
+-- that role. Configure n8n with a separate runtime role holding only the
+-- documented CONNECT, USAGE, SELECT, INSERT, and UPDATE grants.
+-- Existing install: run it as the current owner of public.job_applications
+-- (or a database administrator). A role with only CRUD grants cannot alter
+-- the table. This script does not create roles or databases, store passwords,
+-- or drop existing data.
 --------------------------------------------------------------------
 
--- 1. ----------------------------------------------------------------
--- CREATE LEAST-PRIVILEGE LOGIN ROLES
---------------------------------------------------------------------
-CREATE ROLE <YOUR_ROLE>   LOGIN PASSWORD '<YOUR_PASSWORD>';
+\set ON_ERROR_STOP on
 
+BEGIN;
 
---------------------------------------------------------------------
--- 2. ----------------------------------------------------------------
--- CREATE THE TWO DATABASES OWNED BY THEIR RESPECTIVE ROLES
---------------------------------------------------------------------
-CREATE DATABASE <YOUR_DB>   OWNER <YOUR_ROLE>;
+DO $jobzai$
+BEGIN
+    IF current_setting('server_version_num')::INTEGER < 120000 THEN
+        RAISE EXCEPTION 'jobzAI requires PostgreSQL 12 or newer';
+    END IF;
+END
+$jobzai$;
 
---------------------------------------------------------------------
--- 3. ----------------------------------------------------------------
--- DEFINE `job_applications` TABLE
---------------------------------------------------------------------
-\connect <YOUR_DB>
-
--- Tighten public schema so only superusers can create objects
-REVOKE ALL  ON SCHEMA public FROM PUBLIC;
-GRANT  USAGE ON SCHEMA public TO PUBLIC;
-
-/* ----- DROP the table if it already exists ----------------------- */
-DROP TABLE IF EXISTS public.job_applications CASCADE;
-
-/* ----- Create the new table -------------------------------------- */
-CREATE TABLE public.job_applications (
-    job_id                      TEXT PRIMARY KEY,
-    company_name                TEXT,
-    position                    TEXT,
-    salary                      TEXT,
-    location                    TEXT,
-    posted_date                 TEXT,
-    preference_matches          TEXT,
-    preference_misses           TEXT,
+CREATE TABLE IF NOT EXISTS public.job_applications (
+    job_id                       TEXT PRIMARY KEY,
+    company_name                 TEXT,
+    position                     TEXT,
+    salary                       TEXT,
+    location                     TEXT,
+    posted_date                  TEXT,
+    preference_matches           TEXT,
+    preference_misses            TEXT,
     potential_preference_matches TEXT,
-    preferences_rating          DOUBLE PRECISION,
-    preference_references       TEXT,
-    skill_matches               TEXT,
-    skill_misses                TEXT,
-    skill_translations          TEXT,
-    skill_rating                DOUBLE PRECISION,
-    overall_rating              DOUBLE PRECISION,
-    years_of_experience         TEXT,
-    evaluation                  TEXT,
-    resume                      TEXT,
-    joburl                      TEXT,
-    -- Dimension scores (1-5 scale from enhanced scoring algorithm)
-    dim_employee_satisfaction   DOUBLE PRECISION,
-    dim_salary_competitiveness  DOUBLE PRECISION,
-    dim_remote_work_flexibility DOUBLE PRECISION,
-    dim_skills_alignment        DOUBLE PRECISION,
-    dim_cultural_fit            DOUBLE PRECISION
+    preferences_rating           DOUBLE PRECISION,
+    preference_references        TEXT,
+    skill_matches                TEXT,
+    skill_misses                 TEXT,
+    skill_translations           TEXT,
+    skill_rating                 DOUBLE PRECISION,
+    overall_rating               DOUBLE PRECISION,
+    years_of_experience          TEXT,
+    evaluation                   TEXT,
+    resume                       TEXT,
+    joburl                       TEXT,
+    dim_employee_satisfaction    DOUBLE PRECISION,
+    dim_salary_competitiveness   DOUBLE PRECISION,
+    dim_remote_work_flexibility  DOUBLE PRECISION,
+    dim_skills_alignment         DOUBLE PRECISION,
+    dim_cultural_fit             DOUBLE PRECISION
 );
 
--- NOTE: The 'resume' column is currently unused by the n8n flow but retained for
--- future use (e.g., storing customized resumes per application).
--- Give role exactly what it needs on this table + its sequence
-GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE     public.job_applications       TO <YOUR_ROLE>;
-GRANT USAGE,  SELECT                ON SEQUENCE  job_applications_id_seq        TO <YOUR_ROLE>;
+-- Preserve installations created from an older jobzAI schema while adding
+-- the current scoring dimensions. Existing columns and rows are untouched.
+ALTER TABLE public.job_applications
+    ADD COLUMN IF NOT EXISTS dim_employee_satisfaction    DOUBLE PRECISION,
+    ADD COLUMN IF NOT EXISTS dim_salary_competitiveness   DOUBLE PRECISION,
+    ADD COLUMN IF NOT EXISTS dim_remote_work_flexibility  DOUBLE PRECISION,
+    ADD COLUMN IF NOT EXISTS dim_skills_alignment         DOUBLE PRECISION,
+    ADD COLUMN IF NOT EXISTS dim_cultural_fit             DOUBLE PRECISION;
 
---------------------------------------------------------------------
--- DONE ✅
---------------------------------------------------------------------
+COMMENT ON COLUMN public.job_applications.resume IS
+    'Reserved for future use, such as storing a tailored resume per application.';
+
+COMMIT;

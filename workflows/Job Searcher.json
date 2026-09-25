@@ -1,0 +1,1376 @@
+{
+  "name": "Job Searcher",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -3680,
+        864
+      ],
+      "id": "34891489-9dcc-4156-b61d-04e4348b5008",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -1792,
+        352
+      ],
+      "id": "f613aa9f-6ac2-47ed-8aa6-afcf535e5cec",
+      "name": "Process Job Postings"
+    },
+    {
+      "parameters": {
+        "jsCode": "// n8n Code node: Run Once for All Items\n// Replaces the entire body of \"De-duplicate Job Posts\".\n// Deliberately avoids the global URL constructor, which may be unavailable in n8n's Code sandbox.\n\nconst items = $input.all();\nconst byId = new Map();\nconst invalidJobs = [];\nlet duplicateCount = 0;\n\nfunction text(value) {\n  return value == null ? '' : String(value).trim();\n}\n\nfunction summarizeSource(job, reason) {\n  return {\n    title: text(job?.title) || 'Unknown LinkedIn job',\n    job_url: text(job?.link || job?.job_url),\n    reason,\n  };\n}\n\nfunction parseLinkedInUrl(rawUrl) {\n  // LinkedIn feed URLs shouldn't contain unescaped spaces or control characters.\n  if (/[\\u0000-\\u0020\\u007f]/.test(rawUrl)) {\n    throw new Error('LinkedIn job URL contains whitespace or control characters.');\n  }\n\n  // Parse only the absolute HTTPS structure needed by this workflow.\n  const match = rawUrl.match(\n    /^https:\\/\\/([^/?#]+)(\\/[^?#]*)?(?:\\?([^#]*))?(?:#.*)?$/i,\n  );\n  if (!match) {\n    throw new Error('LinkedIn job URL must be an absolute HTTPS URL.');\n  }\n\n  const authority = match[1].toLowerCase();\n  if (authority.includes('@')) {\n    throw new Error('LinkedIn job URL must not contain user information.');\n  }\n\n  // Port 443 is equivalent to normal HTTPS. Other explicit ports are rejected by\n  // the hostname allowlist below.\n  const host = authority.replace(/:443$/, '');\n  if (host !== 'linkedin.com' && !host.endsWith('.linkedin.com')) {\n    throw new Error('Job URL is not on linkedin.com.');\n  }\n\n  return {\n    pathname: match[2] || '/',\n    query: match[3] || '',\n  };\n}\n\nfunction canonicalLinkedInJob(job) {\n  const directId = text(job?.job_id);\n  const rawUrl = text(job?.link || job?.job_url);\n  if (!rawUrl) throw new Error('Missing LinkedIn job URL.');\n\n  const parsed = parseLinkedInUrl(rawUrl);\n  const candidates = [];\n\n  if (directId) {\n    if (!/^\\d{6,20}$/.test(directId)) {\n      throw new Error('Existing job_id is not a valid numeric LinkedIn job ID.');\n    }\n    candidates.push(directId);\n  }\n\n  // LinkedIn search/collection URLs can carry the selected job in a query parameter.\n  for (const key of ['currentJobId', 'jobId']) {\n    const queryMatch = parsed.query.match(\n      new RegExp(`(?:^|&)${key}=(\\\\d{6,20})(?:&|$)`),\n    );\n    if (queryMatch) candidates.push(queryMatch[1]);\n  }\n\n  // Supports both:\n  // /jobs/view/security-engineer-at-company-4468699157\n  // /jobs/view/4468699157\n  const pathMatch = parsed.pathname.match(\n    /\\/jobs\\/view\\/(?:[^/?#]*-)?(\\d{6,20})\\/?$/i,\n  );\n  if (pathMatch) candidates.push(pathMatch[1]);\n\n  const unique = [...new Set(candidates)];\n  if (unique.length === 0) {\n    throw new Error('Unable to extract a numeric LinkedIn job ID.');\n  }\n  if (unique.length > 1) {\n    throw new Error('Conflicting LinkedIn job IDs were found in the record.');\n  }\n\n  const jobId = unique[0];\n  const canonicalUrl = `https://www.linkedin.com/jobs/view/${jobId}`;\n\n  return {\n    ...job,\n    item_type: 'job',\n    job_id: jobId,\n    source_link: rawUrl,\n    link: canonicalUrl,\n    job_url: canonicalUrl,\n  };\n}\n\nfor (const item of items) {\n  try {\n    const normalized = canonicalLinkedInJob(item.json || {});\n    if (byId.has(normalized.job_id)) {\n      duplicateCount += 1;\n      continue;\n    }\n    byId.set(normalized.job_id, normalized);\n  } catch (error) {\n    invalidJobs.push(\n      summarizeSource(item.json || {}, String(error?.message || error)),\n    );\n  }\n}\n\nconst runIngestMeta = {\n  source_execution_id: String($execution.id),\n  feed_count: items.length,\n  canonical_distinct_count: byId.size,\n  duplicate_count: duplicateCount,\n  invalid_count: invalidJobs.length,\n  invalid_jobs: invalidJobs.slice(0, 20),\n  invalid_jobs_omitted: Math.max(0, invalidJobs.length - 20),\n};\n\nconst normalizedItems = [...byId.values()].map((job) => ({\n  json: { ...job, run_ingest_meta: runIngestMeta },\n}));\n\nif (normalizedItems.length > 0) return normalizedItems;\n\nreturn [\n  {\n    json: {\n      item_type: 'run_control',\n      run_control: 'no_valid_jobs',\n      run_ingest_meta: runIngestMeta,\n    },\n  },\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2880,
+        864
+      ],
+      "id": "06416779-bad0-4cdd-aea0-0d5211e4cd32",
+      "name": "De-duplicate Job Posts",
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const existingJobIds = new Set(\n  $input.all()\n    .map((item) => String(item.json?.job_id || '').trim())\n    .filter((value) => /^\\d{6,20}$/.test(value))\n);\n\nconst normalizedItems = $('De-duplicate Job Posts').all();\nconst candidates = normalizedItems.filter((item) => item.json?.item_type === 'job');\nconst newJobs = candidates.filter((item) => !existingJobIds.has(String(item.json.job_id)));\nconst ingestMeta = normalizedItems.find((item) => item.json?.run_ingest_meta)?.json?.run_ingest_meta || {};\nconst runContext = {\n  ...ingestMeta,\n  existing_count: Math.max(0, candidates.length - newJobs.length),\n  new_count: newJobs.length,\n  expected_job_ids: newJobs.map((item) => String(item.json.job_id)),\n};\n\nif (newJobs.length > 0) {\n  return newJobs.map((item) => ({\n    json: {\n      ...item.json,\n      run_context: runContext,\n    },\n  }));\n}\n\nreturn [{\n  json: {\n    item_type: 'run_control',\n    run_control: candidates.length === 0 ? 'no_valid_jobs' : 'no_new_jobs',\n    report_state: candidates.length === 0 ? 'no_valid_jobs' : 'no_new_jobs',\n    source_execution_id: String($execution.id),\n    run_context: runContext,\n    jobs: [],\n    failed_jobs: [],\n    counts: {\n      feed: Number(runContext.feed_count || 0),\n      distinct: Number(runContext.canonical_distinct_count || 0),\n      duplicates: Number(runContext.duplicate_count || 0),\n      invalid: Number(runContext.invalid_count || 0),\n      existing: Number(runContext.existing_count || 0),\n      new: 0,\n      selected: 0,\n      rejected: 0,\n      failed: 0,\n      emailed: 0,\n      omitted_by_limit: 0,\n      database_missing: 0,\n    },\n    ingest_failures: Array.isArray(runContext.invalid_jobs) ? runContext.invalid_jobs : [],\n  },\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2464,
+        864
+      ],
+      "id": "04a75c5b-c283-45e3-91e1-8361d9ab76b9",
+      "name": "De-duplicate Jobs in DB"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -800,
+        544
+      ],
+      "id": "4c8d800f-5b8e-412b-955e-b4ea36376af8",
+      "name": "Wait Before Skill Rating"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -304,
+        544
+      ],
+      "id": "f81a4b05-6f9d-49e4-8542-0d95f12d690d",
+      "name": "Wait Before Overall Rating"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  job_id, company_name, position, salary, location, posted_date,\n  preference_matches, preference_misses, potential_preference_matches,\n  preferences_rating, preference_references, skill_matches, skill_misses,\n  skill_translations, skill_rating, years_of_experience, evaluation, joburl,\n  overall_rating, dim_employee_satisfaction, dim_salary_competitiveness,\n  dim_remote_work_flexibility, dim_skills_alignment, dim_cultural_fit\nFROM public.job_applications\nWHERE job_id IN (SELECT jsonb_array_elements_text($1::jsonb))\nORDER BY overall_rating DESC, job_id ASC\nLIMIT $2;",
+        "options": {
+          "queryReplacement": "={{ [ JSON.stringify($json.selected_job_ids || []), $json.report_limit ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -1296,
+        208
+      ],
+      "id": "2b43c2ff-1805-4e6d-ba78-0bcac1dad02d",
+      "name": "Select Top Jobs",
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT job_id\nFROM public.job_applications\nWHERE job_id IN (SELECT jsonb_array_elements_text($1::jsonb));",
+        "options": {
+          "queryReplacement": "={{ [ JSON.stringify($('De-duplicate Job Posts').all().filter(item => item.json.item_type === 'job').map(item => String(item.json.job_id))) ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -2672,
+        864
+      ],
+      "id": "6603fb7a-3be4-4b54-95a1-afc55f55256e",
+      "name": "Select All Jobs",
+      "alwaysOutputData": true,
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "51d5da04-9cd8-4475-ab0d-158bc8581b9d",
+              "leftValue": "={{ $json.overall_score }}",
+              "rightValue": 3,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        448,
+        544
+      ],
+      "id": "7617deef-e157-4e49-bb0d-4962dd97a671",
+      "name": "If Overall Score >= 3.0"
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "job_applications",
+          "mode": "list",
+          "cachedResultName": "job_applications"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "preferences_rating": "={{ $json.preferences_rating }}",
+            "skill_rating": "={{ $json.skill_rating }}",
+            "overall_rating": "={{ $json.overall_score }}",
+            "job_id": "={{ $json.job_id }}",
+            "company_name": "={{ $json.company_name }}",
+            "position": "={{ $json.position }}",
+            "salary": "={{ $json.salary }}",
+            "location": "={{ $json.location }}",
+            "posted_date": "={{ $json.posted_date }}",
+            "preference_matches": "={{ $json.preference_matches.join(\"[END_OF_BULLET]\") }}",
+            "preference_misses": "={{ $json.preference_misses.join(\"[END_OF_BULLET]\") }}",
+            "potential_preference_matches": "={{ $json.potential_preference_matches.join(\"[END_OF_BULLET]\") }}",
+            "preference_references": "={{ $json.references.join(\"[END_OF_BULLET]\") }}",
+            "skill_matches": "={{ $json.skill_matches.join(\"[END_OF_BULLET]\") }}",
+            "skill_misses": "={{ $json.skill_misses.join(\"[END_OF_BULLET]\") }}",
+            "skill_translations": "={{ $json.skill_translations.join(\"[END_OF_BULLET]\") }}",
+            "years_of_experience": "={{ $json.years_of_experience }}",
+            "evaluation": "={{ $json.explanation }}",
+            "joburl": "={{ $json.job_url }}",
+            "dim_employee_satisfaction": "={{ $json.dimension_values?.employee_satisfaction || null }}",
+            "dim_salary_competitiveness": "={{ $json.dimension_values?.salary_competitiveness || null }}",
+            "dim_remote_work_flexibility": "={{ $json.dimension_values?.remote_work_flexibility || null }}",
+            "dim_skills_alignment": "={{ $json.dimension_values?.skills_alignment || null }}",
+            "dim_cultural_fit": "={{ $json.dimension_values?.cultural_fit || null }}"
+          },
+          "matchingColumns": [
+            "job_id"
+          ],
+          "schema": [
+            {
+              "id": "job_id",
+              "displayName": "job_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "company_name",
+              "displayName": "company_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "position",
+              "displayName": "position",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "salary",
+              "displayName": "salary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "location",
+              "displayName": "location",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "posted_date",
+              "displayName": "posted_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "preference_matches",
+              "displayName": "preference_matches",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "preference_misses",
+              "displayName": "preference_misses",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "potential_preference_matches",
+              "displayName": "potential_preference_matches",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "preferences_rating",
+              "displayName": "preferences_rating",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "preference_references",
+              "displayName": "preference_references",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "skill_matches",
+              "displayName": "skill_matches",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "skill_misses",
+              "displayName": "skill_misses",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "skill_translations",
+              "displayName": "skill_translations",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "skill_rating",
+              "displayName": "skill_rating",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "years_of_experience",
+              "displayName": "years_of_experience",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "evaluation",
+              "displayName": "evaluation",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "resume",
+              "displayName": "resume",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "joburl",
+              "displayName": "joburl",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "overall_rating",
+              "displayName": "overall_rating",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "dim_employee_satisfaction",
+              "displayName": "dim_employee_satisfaction",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "dim_salary_competitiveness",
+              "displayName": "dim_salary_competitiveness",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "dim_remote_work_flexibility",
+              "displayName": "dim_remote_work_flexibility",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "dim_skills_alignment",
+              "displayName": "dim_skills_alignment",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "dim_cultural_fit",
+              "displayName": "dim_cultural_fit",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        688,
+        464
+      ],
+      "id": "73201c94-8c85-4bde-9ce4-9458eb1409ff",
+      "name": "Insert Job"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ed3e7b63-257e-43e2-a6f2-865c77ca8e29",
+              "leftValue": "={{ Array.isArray($json.jobs) ? $json.jobs.length : 0 }}",
+              "rightValue": 1,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -784,
+        208
+      ],
+      "id": "0922c3fb-d234-4073-a31f-664bb4b8ba78",
+      "name": "If New Jobs Found"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Complete replacement code for n8n node: Generate Jobs Email HTML\n\nconst report = $input.first().json || {};\nconst jobs = Array.isArray(report.jobs) ? report.jobs : [];\nif (jobs.length === 0) throw new Error('Refusing to generate a selected-jobs email with zero jobs.');\nconst reportLimit = Number(report.report_limit);\nif (!Number.isInteger(reportLimit) || reportLimit < 1) {\n  throw new Error('Selected-jobs report has an invalid report_limit.');\n}\nif (jobs.length > reportLimit) {\n  throw new Error(`Selected-jobs report contains ${jobs.length} jobs for a limit of ${reportLimit}.`);\n}\n\nconst required = ['job_id', 'position', 'company_name', 'joburl'];\nfor (const [index, job] of jobs.entries()) {\n  const missing = required.filter((key) => job?.[key] == null || String(job[key]).trim() === '');\n  if (missing.length) throw new Error(`Job ${index} is missing required fields: ${missing.join(', ')}`);\n}\n\nfunction esc(value) {\n  return String(value ?? '')\n    .replace(/&/g, '&amp;')\n    .replace(/</g, '&lt;')\n    .replace(/>/g, '&gt;')\n    .replace(/\"/g, '&quot;')\n    .replace(/'/g, '&#39;');\n}\nfunction display(value, fallback = 'Not available') {\n  const normalized = String(value ?? '').trim();\n  return esc(normalized || fallback);\n}\nfunction safeLinkedInUrl(value) {\n  const raw = String(value || '').trim();\n  if (!raw || /[\\u0000-\\u0020\\u007f]/.test(raw)) return null;\n  const match = raw.match(/^https:\\/\\/([^/?#]+)(\\/[^?#]*)?(?:\\?[^#]*)?(?:#.*)?$/i);\n  if (!match) return null;\n  const authority = match[1].toLowerCase();\n  if (authority.includes('@')) return null;\n  const host = authority.replace(/:443$/, '');\n  if (host !== 'linkedin.com' && !host.endsWith('.linkedin.com')) return null;\n  return raw;\n}\nfunction listHtml(value, fallback) {\n  const entries = String(value ?? '')\n    .split('[END_OF_BULLET]')\n    .map((entry) => entry.trim())\n    .filter(Boolean);\n  if (entries.length === 0) return `<li>${esc(fallback)}</li>`;\n  return entries.map((entry) => `<li>${esc(entry)}</li>`).join('');\n}\nfunction dimBadge(value) {\n  if (value === null || value === undefined || value === 'null' || value === '') {\n    return '<span class=\"dim-score dim-null\" title=\"Not available\">—</span>';\n  }\n  const number = Number(value);\n  if (!Number.isFinite(number)) return '<span class=\"dim-score dim-null\" title=\"Not available\">—</span>';\n  const cls = number >= 4 ? 'dim-high' : number >= 3 ? 'dim-mid' : 'dim-low';\n  return `<span class=\"dim-score ${cls}\" title=\"Score ${esc(number)} out of 5\">${esc(number)}</span>`;\n}\n\nconst counts = report.counts || {};\nconst failures = Array.isArray(report.failed_jobs) ? report.failed_jobs : [];\nconst visibleFailures = failures.slice(0, 20);\nconst failureItems = visibleFailures.map((failure) => {\n  const url = safeLinkedInUrl(failure.job_url);\n  const label = display(failure.title || failure.job_id, 'LinkedIn job');\n  const link = url ? `<a href=\"${esc(url)}\">${label}</a>` : label;\n  return `<li>${link} — ${display(failure.summary, 'Automated analysis failed after retries.')}</li>`;\n}).join('');\nconst hiddenFailureCount = Math.max(0, failures.length - visibleFailures.length);\n\nconst cards = jobs.map((job) => {\n  const url = safeLinkedInUrl(job.joburl);\n  if (!url) throw new Error(`Job ${job.job_id} has an invalid LinkedIn URL.`);\n  return `<article class=\"card\">\n    <div class=\"card-header\">\n      <h2>${display(job.position)} at ${display(job.company_name)}</h2>\n      <a href=\"${esc(url)}\" class=\"button\">View job posting</a>\n    </div>\n    <div class=\"job-info\">\n      <span><strong>Job ID:</strong> ${display(job.job_id)}</span>\n      <span><strong>Location:</strong> ${display(job.location)}</span>\n      <span><strong>Salary:</strong> ${display(job.salary)}</span>\n      <span><strong>Posted:</strong> ${display(job.posted_date)}</span>\n    </div>\n    <table class=\"ratings-table\">\n      <caption>Fit ratings</caption>\n      <thead><tr><th scope=\"col\">Overall</th><th scope=\"col\">Preference</th><th scope=\"col\">Skill</th><th scope=\"col\">Explanation</th></tr></thead>\n      <tbody><tr><td>${display(job.overall_rating)}</td><td>${display(job.preferences_rating)}</td><td>${display(job.skill_rating)}</td><td>${display(job.evaluation)}</td></tr></tbody>\n    </table>\n    <table class=\"dim-table\">\n      <caption>Dimension ratings</caption>\n      <thead><tr><th scope=\"col\">Employee satisfaction</th><th scope=\"col\">Salary</th><th scope=\"col\">Remote flexibility</th><th scope=\"col\">Skills alignment</th><th scope=\"col\">Cultural fit</th></tr></thead>\n      <tbody><tr><td>${dimBadge(job.dim_employee_satisfaction)}</td><td>${dimBadge(job.dim_salary_competitiveness)}</td><td>${dimBadge(job.dim_remote_work_flexibility)}</td><td>${dimBadge(job.dim_skills_alignment)}</td><td>${dimBadge(job.dim_cultural_fit)}</td></tr></tbody>\n    </table>\n    <section><h3>Preference matches</h3><ul>${listHtml(job.preference_matches, 'No preference matches')}</ul></section>\n    <section><h3>References</h3><ul>${listHtml(job.preference_references, 'No preference references')}</ul></section>\n    <section><h3>Preference misses</h3><ul>${listHtml(job.preference_misses, 'No preference misses')}</ul></section>\n    <section><h3>Potential preference matches</h3><ul>${listHtml(job.potential_preference_matches, 'No potential preference matches')}</ul></section>\n    <section><h3>Skill matches</h3><ul>${listHtml(job.skill_matches, 'No skill matches')}</ul></section>\n    <section><h3>Skill misses</h3><ul>${listHtml(job.skill_misses, 'No skill misses')}</ul></section>\n    <section><h3>Transferable skills</h3><ul>${listHtml(job.skill_translations, 'No transferable skills')}</ul></section>\n  </article>`;\n}).join('');\n\nconst omittedNotice = Number(counts.omitted_by_limit || 0) > 0\n  ? `<p><strong>${esc(counts.omitted_by_limit)} additional qualifying job(s)</strong> were not included because this report is capped at ${esc(reportLimit)} current-run jobs.</p>`\n  : '';\nconst databaseWarning = Number(counts.database_missing || 0) > 0\n  ? `<p><strong>Warning:</strong> ${esc(counts.database_missing)} selected job(s) could not be read back from the database.</p>`\n  : '';\nconst failureSection = failures.length > 0\n  ? `<section class=\"review\"><h2>Jobs requiring manual review (${esc(failures.length)})</h2><p>Automated analysis failed after three attempts. These jobs were not scored or selected automatically.</p><ul>${failureItems}</ul>${hiddenFailureCount ? `<p>${esc(hiddenFailureCount)} additional failure(s) are available in the execution record.</p>` : ''}</section>`\n  : '';\n\nconst html = `<!DOCTYPE html>\n<html lang=\"en\"><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"><title>Current Job Search Report</title>\n<style>\nbody{font-family:Inter,-apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,sans-serif;background:#f4f7fa;color:#111827;line-height:1.6;margin:0;padding:20px}.container{max-width:1100px;margin:0 auto;background:#fff;border-radius:12px;padding:24px}h1{text-align:center;font-size:26px}h2{font-size:19px}h3{font-size:16px}.summary,.review{border:1px solid #94a3b8;border-radius:10px;padding:16px;margin:20px 0}.card{border:2px solid #64748b;border-radius:10px;padding:16px;margin:20px 0;background:#f8fafc}.card-header{display:flex;justify-content:space-between;align-items:center;gap:16px}.button{display:inline-block;padding:10px 14px;min-height:24px;background:#1d4ed8;color:#fff!important;text-decoration:none;border-radius:6px;font-weight:700}.job-info{display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;margin-bottom:16px}table{width:100%;border-collapse:collapse;margin:16px 0}caption{text-align:left;font-weight:700;margin-bottom:6px}th,td{padding:8px;text-align:left;border-bottom:1px solid #cbd5e1}.dim-table th,.dim-table td{text-align:center}.dim-score{display:inline-block;min-width:28px;height:28px;line-height:28px;border-radius:50%;font-weight:700;color:#fff}.dim-high{background:#166534}.dim-mid{background:#92400e}.dim-low{background:#991b1b}.dim-null{background:#475569}a{color:#1d4ed8}ul{padding-left:22px}@media(max-width:650px){body{padding:8px}.container{padding:14px}.card-header{display:block}.button{margin-top:8px}.job-info{grid-template-columns:1fr}th,td{font-size:12px;padding:5px}}\n</style></head><body><main class=\"container\"><h1>Current Job Search Report</h1>\n<section class=\"summary\"><h2>Run summary</h2><p>${esc(counts.feed || 0)} feed item(s) → ${esc(counts.distinct || 0)} distinct job(s) → ${esc(counts.new || 0)} new job(s) → ${esc(counts.selected || 0)} selected, ${esc(counts.rejected || 0)} rejected, ${esc(counts.failed || 0)} failed.</p>${omittedNotice}${databaseWarning}</section>\n${cards}${failureSection}</main></body></html>`;\n\nreturn [{ json: { ...report, output: html, subject: `Job Search Report — ${jobs.length} current match${jobs.length === 1 ? '' : 'es'}` } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -528,
+        80
+      ],
+      "id": "7b6c1044-00c4-4b81-ae9d-e13844cfc9a3",
+      "name": "Generate Jobs Email HTML"
+    },
+    {
+      "parameters": {
+        "fromEmail": "[YOUR_FROM_EMAIL]",
+        "toEmail": "[YOUR_TO_EMAIL]",
+        "subject": "={{ $json.subject }}",
+        "html": "={{ $json.output }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        -272,
+        80
+      ],
+      "id": "a85867b4-3fff-4041-88cd-017cf3bb04f7",
+      "name": "Send Jobs Email"
+    },
+    {
+      "parameters": {
+        "fromEmail": "[YOUR_FROM_EMAIL]",
+        "toEmail": "[YOUR_TO_EMAIL]",
+        "subject": "={{ $json.subject }}",
+        "html": "={{ $json.output }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        -272,
+        400
+      ],
+      "id": "5019c7ee-30b1-4c61-92ed-f09471fc04af",
+      "name": "Send No New Jobs Email"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ec95cdd5-2735-4620-aeda-cfdbb488768a",
+              "leftValue": "={{ $json.item_type === 'job' ? 1 : 0 }}",
+              "rightValue": 1,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -2272,
+        864
+      ],
+      "id": "efd7d6fa-dce6-4926-810c-898197c91796",
+      "name": "If New Jobs"
+    },
+    {
+      "parameters": {
+        "jsCode": "const ledger = $('Build Run Ledger').first().json;\nconst selectedIds = new Set((ledger.selected_job_ids || []).map((value) => String(value)));\nconst rows = $input.all()\n  .map((item) => item.json || {})\n  .filter((row) => /^\\d{6,20}$/.test(String(row.job_id || '')))\n  .filter((row) => selectedIds.has(String(row.job_id)));\n\nconst returnedIds = new Set(rows.map((row) => String(row.job_id)));\nif (returnedIds.size !== rows.length) {\n  throw new Error('Current-run database query returned duplicate job IDs.');\n}\n\nconst resultLimit = Number(ledger.report_limit);\nif (!Number.isInteger(resultLimit) || resultLimit < 1) {\n  throw new Error('Build Run Ledger returned an invalid report_limit.');\n}\nif (rows.length > resultLimit) {\n  throw new Error(`Current-run database query returned ${rows.length} rows for a report limit of ${resultLimit}.`);\n}\nconst expectedRowsWithinLimit = Math.min(selectedIds.size, resultLimit);\nconst databaseMissing = Math.max(0, expectedRowsWithinLimit - rows.length);\nconst omittedByLimit = Math.max(0, selectedIds.size - resultLimit);\nconst reportState = rows.length > 0\n  ? (databaseMissing > 0 ? 'selected_jobs_with_warnings' : 'selected_jobs')\n  : (selectedIds.size > 0 ? 'report_incomplete' : 'no_qualifying_jobs');\n\nreturn [{\n  json: {\n    ...ledger,\n    report_state: reportState,\n    jobs: rows,\n    counts: {\n      ...(ledger.counts || {}),\n      emailed: rows.length,\n      omitted_by_limit: omittedByLimit,\n      database_missing: databaseMissing,\n    },\n  },\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1040,
+        208
+      ],
+      "id": "e8d1da05-ae6e-4fc2-8369-13db245c67f4",
+      "name": "Build Current Run Report"
+    },
+    {
+      "parameters": {
+        "numberInputs": 5
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -3104,
+        816
+      ],
+      "id": "73a425b8-ba4d-4a40-aa8e-40e348909399",
+      "name": "Merge Job Postings"
+    },
+    {
+      "parameters": {
+        "content": "## LinkedIn RSS feeds by job search\n\n- Add any accessible RSS feed whose items link to LinkedIn jobs\n- rss.app is one option for converting a LinkedIn search URL\n- Rename feeds to match your searches\n- Use 2–10 feeds with one Merge node; chain Merge nodes for more\n- For one feed, bypass Merge Job Postings",
+        "height": 1376,
+        "width": 224
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -3440,
+        80
+      ],
+      "id": "363942df-7956-42b1-90ec-bc8b1614f67b",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "url": "[RSS_FEED_URL_1]",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        -3376,
+        480
+      ],
+      "id": "aeafe5f8-3039-4dab-8f5a-5aef247e5349",
+      "name": "RSS Feed 1"
+    },
+    {
+      "parameters": {
+        "url": "[RSS_FEED_URL_2]",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        -3376,
+        672
+      ],
+      "id": "e035408f-99c2-476a-a9d2-95c04b9474ea",
+      "name": "RSS Feed 2"
+    },
+    {
+      "parameters": {
+        "url": "[RSS_FEED_URL_3]",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        -3376,
+        864
+      ],
+      "id": "5093004b-db93-4c23-b3ec-b0027bf6de97",
+      "name": "RSS Feed 3"
+    },
+    {
+      "parameters": {
+        "url": "[RSS_FEED_URL_4]",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        -3376,
+        1072
+      ],
+      "id": "dbeefff2-c3b5-42e0-b58c-ba71c5c0117e",
+      "name": "RSS Feed 4"
+    },
+    {
+      "parameters": {
+        "url": "[RSS_FEED_URL_5]",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        -3376,
+        1296
+      ],
+      "id": "1c34c440-90d6-44f0-a574-db083e5c29af",
+      "name": "RSS Feed 5"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.tavily.com/search",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpBearerAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ query: ($json.title || \"\") + \" employee reviews culture glassdoor reddit\", max_results: 5, search_depth: \"basic\", include_answer: true }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1600,
+        544
+      ],
+      "id": "77ee9ad5-b92c-42c3-ac39-2c77315b1844",
+      "name": "Tavily Search",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const envelope = $input.first().json;\nconst preferences = envelope.results?.preferences;\nconst skills = envelope.results?.skills;\nconst overall = envelope.results?.overall;\n\nif (!preferences || !skills || !overall) {\n  throw new Error('Missing one or more validated analysis results.');\n}\n\nconst BASE_WEIGHTS = {\n  employee_satisfaction: 0.25,\n  salary_competitiveness: 0.25,\n  remote_work_flexibility: 0.20,\n  skills_alignment: 0.20,\n  cultural_fit: 0.10,\n};\nconst DIMENSIONS = Object.keys(BASE_WEIGHTS);\nconst present = {};\nconst missing = [];\nlet overallScore = 0.0;\nlet normalizedWeights = {};\nlet note = '';\n\nif (Number(preferences.preferences_rating) === 0) {\n  missing.push(...DIMENSIONS);\n  note = 'Veto: preference eligibility failed or remains unverified.';\n} else {\n  for (const dimension of DIMENSIONS) {\n    const value = overall[dimension];\n    if (typeof value === 'number' && Number.isFinite(value)) {\n      present[dimension] = Math.max(1, Math.min(5, value));\n    } else {\n      missing.push(dimension);\n    }\n  }\n\n  const included = Object.keys(present);\n  if (included.length === 0) {\n    note = 'No valid dimension scores provided.';\n  } else {\n    const rawWeightSum = included.reduce((sum, key) => sum + BASE_WEIGHTS[key], 0);\n    normalizedWeights = Object.fromEntries(\n      included.map((key) => [key, BASE_WEIGHTS[key] / rawWeightSum])\n    );\n    const weightedSum = included.reduce(\n      (sum, key) => sum + present[key] * normalizedWeights[key],\n      0\n    );\n    overallScore = Math.round(weightedSum * 10) / 10;\n    note = missing.length\n      ? `Weights renormalized. Excluded: ${missing.join(', ')}`\n      : 'All dimensions present. Weights applied: 25/25/20/20/10.';\n  }\n}\n\nconst expectedDetermination = overallScore >= 3.0 ? 'yes' : 'no';\nif (overall.determination !== expectedDetermination) {\n  throw new Error(`Validated determination ${overall.determination} does not match calculated score ${overallScore}.`);\n}\n\nreturn [{\n  json: {\n    ...preferences,\n    ...skills,\n    ...overall,\n    overall_score: overallScore,\n    weights_used: Object.fromEntries(\n      Object.entries(normalizedWeights).map(([key, value]) => [key, Math.round(value * 1000) / 1000])\n    ),\n    dimensions_included: Object.keys(present),\n    dimensions_excluded: missing,\n    dimension_values: present,\n    note,\n    source_job: envelope.job,\n    analysis_meta: envelope.analysis_meta\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        544
+      ],
+      "id": "675d5b63-033e-413f-b73e-4e363315b756",
+      "name": "Calculate Job Fit Score",
+      "notes": "Flattens the three validated results and calculates the same deterministic weighted score used by the overall-analysis contract."
+    },
+    {
+      "parameters": {
+        "jsCode": "const jobSource = $('Process Job Postings').item.json;\nconst researchSource = $input.first().json || {};\nconst jobId = String(jobSource?.job_id || '').trim();\n\nif (!/^\\d{6,20}$/.test(jobId)) {\n  throw new Error('Expected a canonical numeric LinkedIn job_id before analysis.');\n}\n\nconst canonicalUrl = `https://www.linkedin.com/jobs/view/${jobId}`;\nconst research = researchSource.error\n  ? { answer: null, results: [], error: String(researchSource.error), raw: researchSource }\n  : researchSource;\nconst job = {\n  ...jobSource,\n  item_type: 'job',\n  job_id: jobId,\n  link: canonicalUrl,\n  job_url: canonicalUrl,\n};\nconst resume = `[YOUR_RESUME_IN_MARKDOWN]`;\n\nreturn [{\n  json: {\n    job,\n    research,\n    resume,\n    results: {},\n    analysis_meta: {\n      source_workflow: $workflow.name,\n      source_execution_id: String($execution.id),\n      created_at: new Date().toISOString(),\n    },\n  },\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1328,
+        544
+      ],
+      "id": "a6dea2a8-01f0-4739-a011-6821ae395cf1",
+      "name": "Build Analysis Envelope",
+      "notes": "Packages the current job, normalized web-research data, resume, and stage results into one item that is passed sequentially through all sub-workflows."
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list",
+          "cachedResultName": "Job Searcher - Preference Analysis"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        -1056,
+        544
+      ],
+      "id": "286ea813-2e69-4853-98c3-ecad7a8b6144",
+      "name": "Execute Preference Analysis",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput",
+      "notes": "Retries the entire child workflow, including model call, parser, and semantic validator. Error output advances to the next posting after the third failure."
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list",
+          "cachedResultName": "Job Searcher - Skill Analysis"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        -560,
+        544
+      ],
+      "id": "3e5b04f8-721e-46ea-90fa-76e104e9207d",
+      "name": "Execute Skill Analysis",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput",
+      "notes": "Retries the entire child workflow, including model call, parser, and semantic validator. Error output advances to the next posting after the third failure."
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list",
+          "cachedResultName": "Job Searcher - Overall Analysis"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        -64,
+        544
+      ],
+      "id": "fa389577-103c-48f2-86df-5b6dd3932e2c",
+      "name": "Execute Overall Analysis",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput",
+      "notes": "Retries the entire child workflow, including model call, parser, and semantic validator. Error output advances to the next posting after the third failure."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Complete replacement code for n8n node: Handle Preference Analysis Failure\n\nconst errorItem = $input.first().json || {};\nlet envelope;\ntry {\n  envelope = $('Build Analysis Envelope').item.json;\n} catch (linkError) {\n  throw new Error(`Unable to resolve the failing job envelope for preferences analysis: ${String(linkError?.message || linkError)}`);\n}\nconst job = envelope.job || {};\nconst diagnosticError = String(errorItem.error || errorItem.message || 'Unknown sub-workflow failure');\nconsole.error('Job analysis stage failed after retries', {\n  stage: 'preferences', attempts: 3, execution_id: String($execution.id),\n  job_id: String(job.job_id || ''), error: diagnosticError,\n});\nreturn [{\n  json: {\n    outcome_status: 'failed',\n    source_execution_id: String(envelope.analysis_meta?.source_execution_id || $execution.id),\n    job_id: String(job.job_id || ''),\n    title: String(job.title || 'LinkedIn job'),\n    company_name: String(job.company_name || job.company || ''),\n    job_url: String(job.source_link || job.link || job.job_url || ''),\n    failure_stage: 'preferences',\n    failure_summary: 'Automated preferences analysis failed after 3 attempts.',\n    diagnostic_error: diagnosticError,\n    run_context: job.run_context || {},\n  },\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1056,
+        832
+      ],
+      "id": "8b5308d7-9efb-4dad-bd3a-8eb651440a09",
+      "name": "Handle Preference Analysis Failure",
+      "notes": "Keeps the failure details in the execution record and returns control to Loop Over Items so one bad posting does not stop the batch."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Complete replacement code for n8n node: Handle Skill Analysis Failure\n\nconst errorItem = $input.first().json || {};\nlet envelope;\ntry {\n  envelope = $('Execute Preference Analysis').item.json;\n} catch (linkError) {\n  throw new Error(`Unable to resolve the failing job envelope for skills analysis: ${String(linkError?.message || linkError)}`);\n}\nconst job = envelope.job || {};\nconst diagnosticError = String(errorItem.error || errorItem.message || 'Unknown sub-workflow failure');\nconsole.error('Job analysis stage failed after retries', {\n  stage: 'skills', attempts: 3, execution_id: String($execution.id),\n  job_id: String(job.job_id || ''), error: diagnosticError,\n});\nreturn [{\n  json: {\n    outcome_status: 'failed',\n    source_execution_id: String(envelope.analysis_meta?.source_execution_id || $execution.id),\n    job_id: String(job.job_id || ''),\n    title: String(job.title || 'LinkedIn job'),\n    company_name: String(job.company_name || job.company || ''),\n    job_url: String(job.source_link || job.link || job.job_url || ''),\n    failure_stage: 'skills',\n    failure_summary: 'Automated skills analysis failed after 3 attempts.',\n    diagnostic_error: diagnosticError,\n    run_context: job.run_context || {},\n  },\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -560,
+        832
+      ],
+      "id": "9b8429a0-43e2-4509-ae93-c08000b9614e",
+      "name": "Handle Skill Analysis Failure",
+      "notes": "Keeps the failure details in the execution record and returns control to Loop Over Items so one bad posting does not stop the batch."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Complete replacement code for n8n node: Handle Overall Analysis Failure\n\nconst errorItem = $input.first().json || {};\nlet envelope;\ntry {\n  envelope = $('Execute Skill Analysis').item.json;\n} catch (linkError) {\n  throw new Error(`Unable to resolve the failing job envelope for overall analysis: ${String(linkError?.message || linkError)}`);\n}\nconst job = envelope.job || {};\nconst diagnosticError = String(errorItem.error || errorItem.message || 'Unknown sub-workflow failure');\nconsole.error('Job analysis stage failed after retries', {\n  stage: 'overall', attempts: 3, execution_id: String($execution.id),\n  job_id: String(job.job_id || ''), error: diagnosticError,\n});\nreturn [{\n  json: {\n    outcome_status: 'failed',\n    source_execution_id: String(envelope.analysis_meta?.source_execution_id || $execution.id),\n    job_id: String(job.job_id || ''),\n    title: String(job.title || 'LinkedIn job'),\n    company_name: String(job.company_name || job.company || ''),\n    job_url: String(job.source_link || job.link || job.job_url || ''),\n    failure_stage: 'overall',\n    failure_summary: 'Automated overall analysis failed after 3 attempts.',\n    diagnostic_error: diagnosticError,\n    run_context: job.run_context || {},\n  },\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -64,
+        832
+      ],
+      "id": "7d527437-2d1c-4490-9144-217addde740c",
+      "name": "Handle Overall Analysis Failure",
+      "notes": "Keeps the failure details in the execution record and returns control to Loop Over Items so one bad posting does not stop the batch."
+    },
+    {
+      "parameters": {
+        "content": "## Retryable and observable analysis setup\n\n1. Import the three analysis sub-workflows before this main workflow.\n2. The public template omits source-instance child workflow IDs.\n3. Select each imported child workflow by name in its Execute Sub-workflow node.\n4. Each analysis stage retries up to 3 total attempts with a 2-second delay.\n5. Every loop exit is normalized as selected, rejected, or failed; the final email reports failures for manual review.\n6. LinkedIn job IDs are canonicalized once immediately after feed merge and reused downstream.\n7. The final database query is parameterized by the selected IDs and the configured REPORT_LIMIT (20 by default).\n8. Zero-result states use an explicit report object; Always Output Data is never interpreted as a job.\n9. The loop ledger requires exactly one selected, rejected, or failed outcome for every expected current-run job ID; mismatches fail closed.",
+        "height": 320,
+        "width": 620
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1616,
+        -144
+      ],
+      "id": "bddd48b0-9ad9-4063-8b6f-479148104769",
+      "name": "Sub-workflow Setup and Retry Notes"
+    },
+    {
+      "parameters": {
+        "jsCode": "const row = $input.first().json || {};\nconst calculated = $('Calculate Job Fit Score').item.json;\nconst job = calculated.source_job || {};\nreturn [{\n  json: {\n    outcome_status: 'selected',\n    source_execution_id: String(calculated.analysis_meta?.source_execution_id || $execution.id),\n    job_id: String(calculated.job_id || row.job_id || job.job_id || ''),\n    title: String(calculated.position || job.title || 'LinkedIn job'),\n    company_name: String(calculated.company_name || job.company_name || job.company || ''),\n    job_url: String(calculated.job_url || row.joburl || job.link || job.job_url || ''),\n    overall_score: Number(calculated.overall_score),\n    run_context: job.run_context || {},\n  },\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        944,
+        464
+      ],
+      "id": "b6cf7fc3-01b4-4d00-b14e-96826dc3ed65",
+      "name": "Mark Selected Job"
+    },
+    {
+      "parameters": {
+        "jsCode": "const calculated = $input.first().json || {};\nconst job = calculated.source_job || {};\nconst preferenceVeto = Number(calculated.preferences_rating) === 0;\nreturn [{\n  json: {\n    outcome_status: 'rejected',\n    source_execution_id: String(calculated.analysis_meta?.source_execution_id || $execution.id),\n    job_id: String(calculated.job_id || job.job_id || ''),\n    title: String(calculated.position || job.title || 'LinkedIn job'),\n    company_name: String(calculated.company_name || job.company_name || job.company || ''),\n    job_url: String(calculated.job_url || job.link || job.job_url || ''),\n    overall_score: Number(calculated.overall_score || 0),\n    reason: preferenceVeto\n      ? 'Remote/US eligibility failed or remained unverified.'\n      : `Overall score ${Number(calculated.overall_score || 0).toFixed(1)} was below 3.0.`,\n    run_context: job.run_context || {},\n  },\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        688,
+        688
+      ],
+      "id": "dd724f8c-778b-4710-b13a-7f4b62458987",
+      "name": "Record Rejected Job"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Change this one value to control the maximum number of selected job cards in each email.\nconst REPORT_LIMIT = 20;\nif (!Number.isInteger(REPORT_LIMIT) || REPORT_LIMIT < 1) {\n  throw new Error('REPORT_LIMIT must be a positive integer.');\n}\n\nconst outcomes = $input.all().map((item) => item.json || {});\nconst allowed = new Set(['selected', 'rejected', 'failed']);\nconst malformed = outcomes.filter((outcome) => !allowed.has(outcome.outcome_status));\nif (malformed.length > 0) throw new Error(`Loop returned ${malformed.length} item(s) without a valid outcome_status.`);\n\nconst executionIds = [...new Set(outcomes.map((outcome) => String(outcome.source_execution_id || '')).filter(Boolean))];\nif (executionIds.length > 1) throw new Error(`Loop mixed multiple execution IDs: ${executionIds.join(', ')}`);\nconst sourceExecutionId = executionIds[0] || String($execution.id);\n\nconst runContext = outcomes.find((outcome) => outcome.run_context)?.run_context || {};\nconst expectedJobIds = (Array.isArray(runContext.expected_job_ids) ? runContext.expected_job_ids : [])\n  .map((value) => String(value));\nif (expectedJobIds.some((jobId) => !/^\\d{6,20}$/.test(jobId))) throw new Error('run_context contains an invalid expected job_id.');\nif (new Set(expectedJobIds).size !== expectedJobIds.length) throw new Error('run_context contains duplicate expected job IDs.');\n\nconst outcomeJobIds = outcomes.map((outcome) => String(outcome.job_id || ''));\nif (outcomeJobIds.some((jobId) => !/^\\d{6,20}$/.test(jobId))) throw new Error('A terminal outcome has an invalid canonical job_id.');\nif (new Set(outcomeJobIds).size !== outcomeJobIds.length) throw new Error('Multiple terminal outcomes were produced for the same job_id.');\n\nconst expectedSet = new Set(expectedJobIds);\nconst outcomeSet = new Set(outcomeJobIds);\nconst missing = expectedJobIds.filter((jobId) => !outcomeSet.has(jobId));\nconst unexpected = outcomeJobIds.filter((jobId) => !expectedSet.has(jobId));\nif (missing.length || unexpected.length || outcomes.length !== expectedJobIds.length) {\n  throw new Error(`Terminal outcome mismatch. Missing: ${missing.join(', ') || 'none'}; unexpected: ${unexpected.join(', ') || 'none'}.`);\n}\n\nconst selectedJobIds = outcomes.filter((outcome) => outcome.outcome_status === 'selected').map((outcome) => outcome.job_id);\nconst failedJobs = outcomes.filter((outcome) => outcome.outcome_status === 'failed').map((outcome) => ({\n  job_id: String(outcome.job_id),\n  title: String(outcome.title || 'LinkedIn job'),\n  company_name: String(outcome.company_name || ''),\n  job_url: String(outcome.job_url || ''),\n  stage: String(outcome.failure_stage || 'analysis'),\n  summary: String(outcome.failure_summary || 'Automated analysis failed after retries.'),\n}));\n\nreturn [{\n  json: {\n    report_version: 1,\n    report_state: selectedJobIds.length > 0 ? 'selection_pending_readback' : 'no_qualifying_jobs',\n    source_execution_id: sourceExecutionId,\n    report_limit: REPORT_LIMIT,\n    selected_job_ids: selectedJobIds,\n    failed_jobs: failedJobs,\n    ingest_failures: Array.isArray(runContext.invalid_jobs) ? runContext.invalid_jobs : [],\n    run_context: runContext,\n    counts: {\n      feed: Number(runContext.feed_count || 0),\n      distinct: Number(runContext.canonical_distinct_count || 0),\n      duplicates: Number(runContext.duplicate_count || 0),\n      invalid: Number(runContext.invalid_count || 0),\n      existing: Number(runContext.existing_count || 0),\n      new: expectedJobIds.length,\n      selected: selectedJobIds.length,\n      rejected: outcomes.filter((outcome) => outcome.outcome_status === 'rejected').length,\n      failed: failedJobs.length,\n      emailed: 0,\n      omitted_by_limit: 0,\n      database_missing: 0,\n    },\n  },\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1552,
+        208
+      ],
+      "id": "77ae8bda-3f7b-45ec-a3cf-3fff0862fc4f",
+      "name": "Build Run Ledger"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Complete replacement code for n8n node: Generate No Jobs Email HTML\n\nconst report = $input.first().json || {};\nconst counts = report.counts || {};\nconst failures = Array.isArray(report.failed_jobs) ? report.failed_jobs : [];\nconst ingestFailures = Array.isArray(report.ingest_failures) ? report.ingest_failures : [];\n\nfunction esc(value) {\n  return String(value ?? '')\n    .replace(/&/g, '&amp;')\n    .replace(/</g, '&lt;')\n    .replace(/>/g, '&gt;')\n    .replace(/\"/g, '&quot;')\n    .replace(/'/g, '&#39;');\n}\nfunction safeLinkedInUrl(value) {\n  const raw = String(value || '').trim();\n  if (!raw || /[\\u0000-\\u0020\\u007f]/.test(raw)) return null;\n  const match = raw.match(/^https:\\/\\/([^/?#]+)(\\/[^?#]*)?(?:\\?[^#]*)?(?:#.*)?$/i);\n  if (!match) return null;\n  const authority = match[1].toLowerCase();\n  if (authority.includes('@')) return null;\n  const host = authority.replace(/:443$/, '');\n  if (host !== 'linkedin.com' && !host.endsWith('.linkedin.com')) return null;\n  return raw;\n}\nfunction linkedItem(item, suffix) {\n  const label = esc(item.title || item.job_id || 'LinkedIn job');\n  const url = safeLinkedInUrl(item.job_url);\n  const link = url ? `<a href=\"${esc(url)}\">${label}</a>` : label;\n  return `<li>${link}${suffix ? ` — ${esc(suffix)}` : ''}</li>`;\n}\n\nconst state = String(report.report_state || report.run_control || 'no_qualifying_jobs');\nconst stateCopy = {\n  no_valid_jobs: {\n    heading: 'No valid LinkedIn jobs found',\n    explanation: 'Feed items were returned, but none had a valid, unambiguous LinkedIn job ID and HTTPS LinkedIn URL.',\n    subject: 'Job Search Report — Feed Items Need Review',\n  },\n  no_new_jobs: {\n    heading: 'No new jobs found',\n    explanation: 'All valid LinkedIn jobs from this run were already present in the database.',\n    subject: 'No New Jobs Found',\n  },\n  no_qualifying_jobs: {\n    heading: 'No qualifying jobs selected',\n    explanation: 'The workflow completed, but no current-run jobs met all eligibility and scoring requirements.',\n    subject: 'Job Search Report — No Qualifying Jobs',\n  },\n  report_incomplete: {\n    heading: 'Job report incomplete',\n    explanation: 'One or more jobs were selected, but their database rows could not be read back for the email. Review this execution before relying on the result.',\n    subject: 'Job Search Report — Action Required',\n  },\n};\nconst copy = stateCopy[state] || stateCopy.no_qualifying_jobs;\nconst heading = copy.heading;\nconst explanation = copy.explanation;\nconst failureItems = failures.slice(0, 20).map((item) => linkedItem(item, item.summary || 'Automated analysis failed after retries.')).join('');\nconst ingestItems = ingestFailures.slice(0, 20).map((item) => linkedItem(item, item.reason || 'The LinkedIn job ID could not be normalized.')).join('');\nconst failureSection = failures.length\n  ? `<section><h2>Jobs requiring manual review (${esc(failures.length)})</h2><p>These jobs were not scored because automated analysis failed after three attempts.</p><ul>${failureItems}</ul></section>`\n  : '';\nconst databaseSection = Number(counts.database_missing || 0) > 0\n  ? `<section><h2>Database readback warning</h2><p>${esc(counts.database_missing)} selected job(s) could not be read back. The report is incomplete.</p></section>`\n  : '';\nconst ingestSection = ingestFailures.length\n  ? `<section><h2>Feed items requiring review (${esc(ingestFailures.length)})</h2><p>These items were not analyzed because their LinkedIn IDs or URLs were invalid or ambiguous.</p><ul>${ingestItems}</ul></section>`\n  : '';\n\nconst html = `<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"><title>${esc(heading)}</title><style>\nbody{font-family:Inter,-apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,sans-serif;background:#f4f7fa;color:#111827;line-height:1.6;margin:0;padding:20px}.container{max-width:760px;margin:0 auto;background:#fff;border-radius:12px;padding:28px}h1{font-size:25px}h2{font-size:18px}section{border-top:1px solid #cbd5e1;margin-top:20px;padding-top:12px}a{color:#1d4ed8}ul{padding-left:22px}\n</style></head><body><main class=\"container\"><h1>${esc(heading)}</h1><p>${esc(explanation)}</p><section><h2>Run summary</h2><p>${esc(counts.feed || 0)} feed item(s), ${esc(counts.distinct || 0)} distinct, ${esc(counts.new || 0)} new, ${esc(counts.rejected || 0)} rejected, ${esc(counts.failed || 0)} failed.</p></section>${databaseSection}${failureSection}${ingestSection}</main></body></html>`;\n\nreturn [{ json: { ...report, output: html, subject: copy.subject } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -528,
+        400
+      ],
+      "id": "822f12e7-a876-4759-8379-385f6f03aee2",
+      "name": "Generate No Jobs Email HTML"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "RSS Feed 2",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "RSS Feed 1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "RSS Feed 3",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "RSS Feed 4",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "RSS Feed 5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Job Postings": {
+      "main": [
+        [
+          {
+            "node": "Build Run Ledger",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Tavily Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "De-duplicate Job Posts": {
+      "main": [
+        [
+          {
+            "node": "Select All Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "De-duplicate Jobs in DB": {
+      "main": [
+        [
+          {
+            "node": "If New Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait Before Skill Rating": {
+      "main": [
+        [
+          {
+            "node": "Execute Skill Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait Before Overall Rating": {
+      "main": [
+        [
+          {
+            "node": "Execute Overall Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select Top Jobs": {
+      "main": [
+        [
+          {
+            "node": "Build Current Run Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select All Jobs": {
+      "main": [
+        [
+          {
+            "node": "De-duplicate Jobs in DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Overall Score >= 3.0": {
+      "main": [
+        [
+          {
+            "node": "Insert Job",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Record Rejected Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Job": {
+      "main": [
+        [
+          {
+            "node": "Mark Selected Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If New Jobs Found": {
+      "main": [
+        [
+          {
+            "node": "Generate Jobs Email HTML",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Generate No Jobs Email HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Jobs Email HTML": {
+      "main": [
+        [
+          {
+            "node": "Send Jobs Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If New Jobs": {
+      "main": [
+        [
+          {
+            "node": "Process Job Postings",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Generate No Jobs Email HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Job Postings": {
+      "main": [
+        [
+          {
+            "node": "De-duplicate Job Posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tavily Search": {
+      "main": [
+        [
+          {
+            "node": "Build Analysis Envelope",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Analysis Envelope",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Job Fit Score": {
+      "main": [
+        [
+          {
+            "node": "If Overall Score >= 3.0",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Analysis Envelope": {
+      "main": [
+        [
+          {
+            "node": "Execute Preference Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Preference Analysis": {
+      "main": [
+        [
+          {
+            "node": "Wait Before Skill Rating",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle Preference Analysis Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Skill Analysis": {
+      "main": [
+        [
+          {
+            "node": "Wait Before Overall Rating",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle Skill Analysis Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Overall Analysis": {
+      "main": [
+        [
+          {
+            "node": "Calculate Job Fit Score",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle Overall Analysis Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Preference Analysis Failure": {
+      "main": [
+        [
+          {
+            "node": "Process Job Postings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Skill Analysis Failure": {
+      "main": [
+        [
+          {
+            "node": "Process Job Postings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Overall Analysis Failure": {
+      "main": [
+        [
+          {
+            "node": "Process Job Postings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Run Ledger": {
+      "main": [
+        [
+          {
+            "node": "Select Top Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Current Run Report": {
+      "main": [
+        [
+          {
+            "node": "If New Jobs Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Selected Job": {
+      "main": [
+        [
+          {
+            "node": "Process Job Postings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record Rejected Job": {
+      "main": [
+        [
+          {
+            "node": "Process Job Postings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate No Jobs Email HTML": {
+      "main": [
+        [
+          {
+            "node": "Send No New Jobs Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RSS Feed 1": {
+      "main": [
+        [
+          {
+            "node": "Merge Job Postings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RSS Feed 2": {
+      "main": [
+        [
+          {
+            "node": "Merge Job Postings",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "RSS Feed 3": {
+      "main": [
+        [
+          {
+            "node": "Merge Job Postings",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "RSS Feed 4": {
+      "main": [
+        [
+          {
+            "node": "Merge Job Postings",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "RSS Feed 5": {
+      "main": [
+        [
+          {
+            "node": "Merge Job Postings",
+            "type": "main",
+            "index": 4
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "meta": {},
+  "nodeGroups": [],
+  "tags": []
+}

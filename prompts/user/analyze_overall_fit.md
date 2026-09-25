@@ -1,26 +1,22 @@
-I have been looking for a new role that fits both my personal preferences and skill set. The following is analysis of the role as it fits each of these criteria:
+Evaluate final job fit using the validated upstream evidence and the deterministic gates and weighted scoring rules in the system instructions.
 
-# Preference
-## Preference Matches
-{{ $('Extract Preferences Response').item.json.preference_matches }}
-## Preference Misses
-{{ $('Extract Preferences Response').item.json.preference_misses }}
-## Potential Preference Matches
-{{ $('Extract Preferences Response').item.json.potential_preference_matches }}
-### Preferences Rating: {{ $('Extract Preferences Response').item.json.preferences_rating }}
+<record_metadata>
+{{ JSON.stringify({ job_id: String($json.job?.job_id || '') }, null, 2) }}
+</record_metadata>
 
-# Skills
-## Skill Matches
-- {{ $json.skill_matches.join("\n- ") }}
+<candidate_priorities>
+- [YOUR_TEAM_AND_CULTURE_PRIORITIES]
+- [YOUR_GROWTH_AND_CHALLENGE_PRIORITIES]
+- [YOUR_DOMAIN_PRIORITIES]
+- [YOUR_ADDITIONAL_LOCATION_PREFERENCES]
+</candidate_priorities>
 
-## Skill Misses
-- {{ $json.skill_misses.join("\n- ") }}
+<preference_analysis>
+{{ JSON.stringify($json.results?.preferences || {}, null, 2) }}
+</preference_analysis>
 
-## Skill Translations
-- {{ $json.skill_translations.join("\n- ") }}
+<skill_analysis>
+{{ JSON.stringify($json.results?.skills || {}, null, 2) }}
+</skill_analysis>
 
-### Skills Rating: {{ $json.skill_rating }}
-
----
-
-Synthesize the above analysis into a final determination using the weighted scoring framework defined in your instructions.
+Apply every veto and minimum-evidence gate before scoring. Return only the analytical fields required by the connected parser. The canonical job_id is attached after validation.

@@ -43,8 +43,14 @@ coverage.xml
 *.cover
 .pytest_cache/
 
-# Environments
+# Environments and local secrets
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
 .venv
 env/
 venv/
@@ -67,6 +73,10 @@ dmypy.json
 
 # Logs
 *.log
+
+# Private personalization inputs and generated workflows
+data/private/
+/personalized-workflows*/
 
 # Claude Code context files
 CLAUDE.md
