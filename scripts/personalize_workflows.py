@@ -34,6 +34,9 @@ SALARY_PATTERN = re.compile(
 )
 MIN_TARGET_SALARY = 1_000
 MAX_TARGET_SALARY = 999_999_999
+MIN_ANNUAL_TRIPS = 0
+MAX_ANNUAL_TRIPS = 365
+REQUIRED_WORK_ARRANGEMENTS = ("fully_remote", "hybrid", "on_site", "any")
 # ISO 4217 List One (current currencies and funds), maintained by SIX and
 # refreshed for this project on 2026-09-21:
 # https://www.six-group.com/dam/download/financial-information/data-center/iso-currrency/lists/list-one.xml
@@ -70,6 +73,8 @@ class PersonalField:
     expected_occurrences: int = 1
     allow_n8n_delimiters: bool = False
     numeric_salary: bool = False
+    integer_bounds: tuple[int, int] | None = None
+    allowed_values: tuple[str, ...] = ()
 
 
 PERSONAL_FIELDS: tuple[PersonalField, ...] = (
@@ -153,10 +158,37 @@ PERSONAL_FIELDS: tuple[PersonalField, ...] = (
         filename="target-annual-salary.md",
         description="target annual salary",
         max_bytes=128,
-        expected_occurrences=2,
         numeric_salary=True,
     ),
+    PersonalField(
+        token="[TARGET_MAX_ANNUAL_TRIPS]",
+        filename="maximum-annual-trips.md",
+        description="maximum annual trips",
+        max_bytes=128,
+        integer_bounds=(MIN_ANNUAL_TRIPS, MAX_ANNUAL_TRIPS),
+    ),
+    PersonalField(
+        token="[YOUR_REQUIRED_WORK_ARRANGEMENT]",
+        filename="required-work-arrangement.md",
+        description="required work arrangement",
+        max_bytes=128,
+        allowed_values=REQUIRED_WORK_ARRANGEMENTS,
+    ),
 )
+
+# These tokens are derived from validated inputs, not additional personal files.
+DERIVED_PLACEHOLDER_COUNTS: Counter[str] = Counter({"[YOUR_RESUME_SHA256]": 1})
+
+# Literal substitution is safe only for validated scalars in these exact contexts.
+JAVASCRIPT_CONFIG_ASSIGNMENTS: dict[str, str] = {
+    "[TARGET_ANNUAL_SALARY]": 'const targetInput = "[TARGET_ANNUAL_SALARY]";',
+    "[TARGET_MAX_ANNUAL_TRIPS]": (
+        'const maxAnnualTrips = Number("[TARGET_MAX_ANNUAL_TRIPS]");'
+    ),
+    "[YOUR_REQUIRED_WORK_ARRANGEMENT]": (
+        'const requiredWorkArrangement = "[YOUR_REQUIRED_WORK_ARRANGEMENT]";'
+    ),
+}
 
 CONFIG_PLACEHOLDER_COUNTS: Counter[str] = Counter(
     {
@@ -181,6 +213,8 @@ class SourceFieldContract:
 
 # Pin every placeholder-bearing source field so token movement or an unsafe context
 # change fails closed until the generator contract is deliberately reviewed.
+# Refresh migration hashes only after all coordinated workflow fields are finalized;
+# do not automatically trust a changed field or bypass its digest verification.
 SOURCE_FIELD_CONTRACTS: tuple[SourceFieldContract, ...] = (
     SourceFieldContract(
         "Job Searcher.json",
@@ -240,25 +274,25 @@ SOURCE_FIELD_CONTRACTS: tuple[SourceFieldContract, ...] = (
         "Job Searcher.json",
         "Build Analysis Envelope",
         ("parameters", "jsCode"),
-        "0e1359814b1f7b74881a5ad5f22e9ae7ff6b25acd14ce529d1576ce9d81bad22",
+        "a92fa377314bd14cbe04987cd54b27cd0bd8b6dc2ee938d7ff077962f007f3fd",
     ),
     SourceFieldContract(
         "Job Searcher - Preference Analysis.json",
         "Preference Analysis Chain",
         ("parameters", "messages", "messageValues", 0, "message"),
-        "39f98f88e65f92ed996ae44e97ab1e35707aa28c14e9acbaa7b2f10e5d3a4f6d",
+        "4d867e52125694fa7400dc39025254131e4016b1db32ff4683567df378f8c4d5",
     ),
     SourceFieldContract(
         "Job Searcher - Overall Analysis.json",
         "Overall Analysis Chain",
         ("parameters", "text"),
-        "7184c465b9c60fdd53b4712aeee81032d02484f1d1d34b3a7714a27edf0eacb0",
+        "e88ce6a037cd305ce2bfe42243d63afe6c3cb495799fbe0f517077fcac481581",
     ),
     SourceFieldContract(
         "Job Searcher - Overall Analysis.json",
         "Overall Analysis Chain",
         ("parameters", "messages", "messageValues", 0, "message"),
-        "e2fcb79704af65a34877ec4c353b7352579a0c26d1852a039612b32ded959ee9",
+        "577e2c0e686d83e706dfa8313a18b40ec39db7c0fd503fd90cb0a3b2f98facbf",
     ),
 )
 
@@ -384,6 +418,20 @@ def _read_personal_field(data_dir: Path, field: PersonalField) -> str:
                 f"{path} amount must be from {MIN_TARGET_SALARY} through "
                 f"{MAX_TARGET_SALARY}"
             )
+    if field.integer_bounds is not None:
+        minimum, maximum = field.integer_bounds
+        if (
+            re.fullmatch(r"[0-9]+", value) is None
+            or not minimum <= int(value) <= maximum
+        ):
+            raise PersonalizationError(
+                f"{path} must contain only ASCII digits for an integer from "
+                f"{minimum} through {maximum}"
+            )
+    if field.allowed_values and value not in field.allowed_values:
+        raise PersonalizationError(
+            f"{path} must be exactly one of: {', '.join(field.allowed_values)}"
+        )
     return value
 
 
@@ -426,12 +474,27 @@ def _expected_source_placeholders() -> Counter[str]:
     expected = Counter(
         {field.token: field.expected_occurrences for field in PERSONAL_FIELDS}
     )
+    expected.update(DERIVED_PLACEHOLDER_COUNTS)
     expected.update(CONFIG_PLACEHOLDER_COUNTS)
     return expected
 
 
 def _replace_string(value: str, personal_values: dict[str, str]) -> str:
+    for token, assignment in JAVASCRIPT_CONFIG_ASSIGNMENTS.items():
+        if token in value and value.count(token) != value.count(assignment):
+            raise PersonalizationError(
+                f"{token} placeholder is no longer in its expected JavaScript "
+                "configuration assignment context"
+            )
+
     resume_token = "[YOUR_RESUME_IN_MARKDOWN]"
+    resume_hash_token = "[YOUR_RESUME_SHA256]"
+    if resume_hash_token in value:
+        resume_digest = hashlib.sha256(
+            personal_values[resume_token].encode("utf-8")
+        ).hexdigest()
+        value = value.replace(resume_hash_token, resume_digest)
+
     if resume_token in value:
         wrapped_token = f"`{resume_token}`"
         if wrapped_token not in value or value.count(resume_token) != value.count(

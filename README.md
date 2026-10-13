@@ -17,10 +17,10 @@ The current implementation is split into one coordinating workflow and three foc
 
 1. The main workflow combines the configured LinkedIn RSS feeds and extracts one canonical numeric LinkedIn `job_id` per posting.
 2. Existing database IDs and duplicate feed entries are removed before analysis.
-3. New jobs are processed one at a time. The main workflow gathers web research (Tavily by default) and builds a shared analysis envelope containing the posting, research, résumé, and run metadata.
-4. The main workflow calls the preference, skill, and overall sub-workflows synchronously in that order. Each child validates structured model output before attaching its result to the envelope.
-5. The main workflow calculates the final weighted score. Jobs scoring at least `3.0` are upserted into PostgreSQL.
-6. After every job has reached a selected, rejected, or failed outcome, the current execution's selected IDs are queried, ranked, and capped at the configured email-report limit (20 by default). Analysis failures are listed separately for manual review.
+3. New jobs are processed one at a time. Tavily Extract attempts to retrieve the full posting at its canonical LinkedIn URL; extraction failure falls back to feed text. Company research is gathered separately. The main workflow builds an envelope containing bounded source material, résumé, validated candidate policy, and run metadata.
+4. Preference, Skill, and Overall Analysis run synchronously in that order. Each child validates structured output and supplied-source excerpts. Parser auto-repair is disabled: format-only repair must not invent missing selection facts. The full-context model fallback and whole-stage retries remain.
+5. Qualification and eligibility gates run before ranking. Only eligible jobs meeting the default skill floor of `4` and normalized score threshold of `3.5` are upserted into PostgreSQL. Higher pay or employer appeal cannot rescue a failed prerequisite.
+6. Every job reaches one selected, rejected, held, or failed outcome. Only the current execution's selected IDs are queried and ranked, up to the email-report limit (20 by default). Unresolved eligibility/evidence and execution failures have separate review sections.
 
 For installation, first use the [setup instructions](#setup) to generate private personalized copies. Import the three generated analysis sub-workflows before the generated main workflow, then open each Execute Sub-workflow node in `Job Searcher` and select the corresponding child workflow by name.
 
@@ -35,14 +35,14 @@ For installation, first use the [setup instructions](#setup) to generate private
 - **Canonical deduplication:** Normalizes LinkedIn URLs into stable numeric job IDs before comparing feed and database records.
 - **Evidence-based AI analysis:** Evaluates preference alignment, skill coverage, and weighted overall fit through separate validated sub-workflows.
 - **Current-run reporting:** Returns the highest-ranked qualifying jobs from the current execution, up to a configurable limit of 20 by default, rather than selecting from historical results.
-- **Visible failure handling:** Lists jobs whose automated analysis failed so they can be reviewed manually.
+- **Visible failure handling:** Lists jobs whose eligibility/evidence needs verification or whose automated analysis failed.
 - **Email notifications:** Sends selected jobs, fit dimensions, evidence summaries, and direct LinkedIn links.
 
 ### Email report format
 
 When the current run selects one or more jobs, JobzAI sends a responsive HTML report with a run summary followed by one card per selected job. The default cap is 20 cards, but it is configurable: change `REPORT_LIMIT` at the top of the `Build Run Ledger` Code node. That value is validated, passed as a parameter to `Select Top Jobs`, used for report accounting, and shown in the omission notice, so no other node needs to be edited. Increasing it can produce much larger emails and database results; test the resulting message with your email provider. The separate manual-review lists retain their own 20-item display cap.
 
-Each job card contains the direct LinkedIn link, role details, fit ratings, dimension scores, evidence, preference findings, and skill findings. Jobs whose automated analysis still fails after three attempts appear in a separate manual-review section rather than being silently omitted.
+Each job card contains the direct LinkedIn link, role details, fit ratings, dimension scores, evidence, preference findings, skill findings, policy version, and travel status. Qualification requirements, compensation ranges, source excerpts, and résumé digest remain in the execution envelope/current-run metadata; this update does not add database columns. Jobs held for evidence verification are distinguished from rejected jobs and from analyses that fail after three attempts.
 
 The report follows this structure:
 
@@ -53,7 +53,7 @@ Current Job Search Report
 
 Run summary
 [Feed items] → [Distinct jobs] → [New jobs] →
-[Selected] selected, [Rejected] rejected, [Failed] failed
+[Selected] selected, [Rejected] rejected, [Held] held, [Failed] failed
 
 [Position] at [Company]
 View job posting → [LinkedIn URL]
@@ -92,7 +92,10 @@ Skill misses
 Transferable skills
 - [Relevant transferable experience]
 
-Jobs requiring manual review
+Eligibility or evidence verification
+- [Job link] — [Unresolved condition]
+
+Jobs whose analysis failed
 - [Job link] — [Failure summary]
 ```
 
@@ -227,7 +230,7 @@ For Gmail:
 
 #### AI models
 
-The analysis workflows use six **OpenAI Chat Model** nodes: a primary model and a fallback/repair model in each of the Preference, Skill, and Overall workflows. The node type does not make OpenAI itself mandatory.
+The analysis workflows use six **OpenAI Chat Model** nodes: a primary model and a full-context fallback model in each of the Preference, Skill, and Overall workflows. The node type does not make OpenAI itself mandatory.
 
 For the fewest changes, use OpenAI or an OpenAI-compatible provider:
 
@@ -237,9 +240,9 @@ For the fewest changes, use OpenAI or an OpenAI-compatible provider:
 4. Confirm that the models support chat completions and reliably follow strict structured-JSON instructions. The workflow validators reject malformed or contract-breaking output.
 5. Assign the credential and model selection to both model nodes in each analysis workflow.
 
-You may instead replace the included model nodes with n8n's provider-specific chat-model nodes. Preserve both `ai_languageModel` connections into each Basic LLM Chain and the fallback/repair model's connection to the Structured Output Parser. Provider-specific credentials, model options, context limits, and structured-output behavior differ, so replacing the nodes may require additional prompt, parser, or retry changes. Run all three analysis workflows end to end after a replacement.
+You may instead replace the included model nodes with n8n's provider-specific chat-model nodes. Preserve both `ai_languageModel` connections into each Basic LLM Chain. Structured Output Parser auto-fix is disabled and has no repair-model connection. Provider-specific credentials, model options, context limits, and structured-output behavior differ, so replacing the nodes may require additional prompt, parser, or retry changes. Run all three analysis workflows end to end after a replacement.
 
-The exported primary and fallback/repair nodes use the same model ID within each workflow. “Fallback” therefore means a secondary chain attempt and parser-repair path by default, not provider-level redundancy. Configure and test a distinct compatible fallback model if you want that additional resilience.
+The exported primary and fallback nodes use the same model ID within each workflow. “Fallback” means a secondary chain attempt, not independent evidence or provider-level redundancy. Configure and test a distinct compatible fallback model if you want that additional resilience.
 
 The exported template currently references `deepseek-v4.1-flash` for Preference and Skill Analysis and `glm-5.3-flash` for Overall Analysis. These are provider model IDs, not requirements; select models that exist at your provider and satisfy the same output contracts.
 
@@ -264,7 +267,11 @@ The downstream Preference Analysis currently expects web research in this shape:
 }
 ```
 
-If the replacement provider returns a different shape, normalize its output before `Build Analysis Envelope` or update that node plus the Preference Analysis prompt and validator. Preserve source URLs: the validator only accepts references that were supplied by the posting or normalized search results. Test the replacement's success and error paths before activating the workflow. Omitting web research entirely is possible because the current error path continues with empty research, but it can leave company signals or strict eligibility requirements unverified and therefore reduce or veto recommendations.
+`Build Analysis Envelope` keeps at most five results, caps titles/URLs, and omits research content above 20,000 characters or generated answers above 8,000 rather than presenting silently truncated evidence as complete. Posting text above 200,000 characters becomes an evidence-verification case. These are character bounds, not a guarantee that every future model's context window is sufficient.
+
+`Tavily Extract Posting` uses the same Bearer Auth credential and calls Tavily's Extract API with one canonical LinkedIn URL, basic extraction, and a 20-second provider timeout. Assign its credential as well as Search's. Extraction adds provider usage per new job; inspect current credits/rate limits before scheduling a backlog. If retrieval is blocked, the feed fallback is assessed for qualification completeness rather than assumed complete.
+
+If the replacement provider returns a different shape, normalize its output before `Build Analysis Envelope` or update that node plus the Preference Analysis prompt and validator. Preserve source URLs: the validator only accepts references that were supplied by the posting or normalized search results. Test the replacement's success and error paths before activating the workflow. Omitting research is possible because the error path continues with empty research. Missing employer sentiment or pay does not independently veto a recommendation; unresolved mandatory eligibility conditions still require review.
 
 ### 2. Personalize workflow files
 
@@ -330,7 +337,7 @@ Import the three analysis sub-workflows first:
 
 Then import `Job Searcher.json` from the same directory.
 
-All four public and generated exports are inactive and intentionally omit credentials and source-instance workflow IDs.
+All four public and generated exports are inactive and intentionally omit credentials and source-instance workflow IDs. The main workflow's three child IDs are intentionally blank. Importing files alone does not connect them: select each imported child in step 4 and save. Cached child names are labels, not executable IDs.
 
 ### 4. Connect workflows and configure the web-interface values
 
@@ -342,15 +349,15 @@ All four public and generated exports are inactive and intentionally omit creden
 3. In both email nodes, replace `[YOUR_FROM_EMAIL]` and `[YOUR_TO_EMAIL]` with the permitted sender and intended report recipient.
 4. Assign the PostgreSQL credential to `Select All Jobs`, `Insert Job`, and `Select Top Jobs`.
 5. Assign the SMTP credential to `Send Jobs Email` and `Send No New Jobs Email`.
-6. For the unchanged web-search setup, create n8n's generic **Bearer Auth** credential, enter the Tavily API key in its **Bearer Token** field without adding a `Bearer ` prefix, and assign it to `Tavily Search`. For another provider, configure or replace the node as described in [Web search](#web-search).
-7. In each analysis workflow, assign your AI-provider credential to both the primary and fallback/repair model nodes, or replace those nodes as described in [AI models](#ai-models).
+6. For the unchanged web-search setup, create n8n's generic **Bearer Auth** credential, enter the Tavily API key in its **Bearer Token** field without adding a `Bearer ` prefix, and assign it to both `Tavily Search` and `Tavily Extract Posting`. For another provider, configure or replace the node as described in [Web search](#web-search).
+7. In each analysis workflow, assign your AI-provider credential to both the primary and fallback model nodes, or replace those nodes as described in [AI models](#ai-models).
 8. Confirm every imported model selection exists at the configured provider and passes the workflow's structured-output validation.
 
 Also review these non-placeholder defaults:
 
 - the RSS feed count and node names;
 - the web-search provider, query, and normalized response shape;
-- the `3.0` overall-score threshold;
+- the `3.5` score threshold and skill floor `4` in `Build Analysis Envelope`;
 - `REPORT_LIMIT` in `Build Run Ledger` (20 emailed jobs by default);
 - the scoring dimensions and weights.
 
@@ -365,7 +372,7 @@ Use a test recipient and keep the workflows inactive while testing. Bound extern
 5. Confirm that both email nodes use an address you control as the test recipient.
 6. Run `Job Searcher` manually from beginning to end with the controlled new job.
 7. Open the three sub-executions from their Execute Sub-workflow nodes and confirm that Preference, Skill, and Overall Analysis each ran and returned a validated structured result. A no-new-jobs email alone is not a complete end-to-end test.
-8. Confirm that every new job reaches one outcome—selected, rejected, or failed—and that the resulting email contains only the current run's selected jobs plus any manual-review failures.
+8. Confirm one outcome per new job—selected, rejected, held, or failed—and that the email separates selected jobs, evidence-verification cases, and failures. Exercise fully remote/no-travel-mention acceptance, hybrid mismatch, within/above-cap travel, unknown pay/reviews, a below-target published maximum, and below-floor skill fit with controlled fixtures. Source-excerpt checks establish containment, not semantic truth: inspect actual model classifications before trusting scheduled recommendations.
 9. Remove all pinned test data and restore the intended feed configuration after the end-to-end test succeeds.
 
 Failure-path simulation and malformed-model-response testing are useful hardening checks, but they require additional controlled fixtures and are outside the initial installation path.
@@ -425,12 +432,26 @@ See `postgres/bootstrap_db.sql` for the complete schema definition.
 
 ## Operational controls
 
-- **Eligibility gate:** The preference workflow requires explicit evidence that a role satisfies the configured remote, hybrid, or on-site arrangement and every mandatory office-geography, relocation, travel, or timezone condition, and that it accepts the candidate's configured location and work jurisdiction. Failed or unverified eligibility produces a preference veto.
-- **Overall-score threshold:** `If Overall Score >= 3.0` controls which jobs are persisted and selected. Adjust the node and corresponding prompt language together if you change the threshold.
+- **Eligibility before score:** `If Selection Eligible` consumes the calculator's validated Boolean, not a score-only shortcut. Failed arrangement/location conditions, explicit closure, sufficiently evidenced non-substitutable qualification gaps, below-floor skills, or a comparable published annual maximum below target reject. Unresolved mandatory conditions and incomplete qualifications are held.
+- **Travel:** Unposted travel never causes rejection or a hold. Required quantified trips above the configured annual maximum reject; optional travel is not a hard gate. Unknown required frequency or unclear necessity of above-limit travel needs review.
+- **Unknown optional evidence:** Missing/unverified/conflicting/noncomparable salary and missing employee sentiment do not independently block selection. Unknown dimension values are null and excluded from the denominator.
+- **Qualification-first ranking:** Defaults are skill floor `4`, rounded score threshold `3.5`, and integer weights skills 60, salary 15, arrangement 10, culture/work content 10, satisfaction 5. Prompt anchors, parser schemas, and `scripts/workflow_policy.js` must change together. The helper is embedded identically in five Code nodes; tests reject drift.
 - **Current-run report cap:** `REPORT_LIMIT` at the top of `Build Run Ledger` controls how many ranked, current-execution jobs can appear in the selected-jobs email. It defaults to `20`; the workflow validates and propagates it to the parameterized PostgreSQL query and report accounting.
-- **Retries:** The configured web-search node and each analysis sub-workflow retry up to three total attempts with a two-second delay.
+- **Retries:** Search and each analysis sub-workflow use up to three attempts; posting extraction uses up to two. The existing two-second retry delay remains.
 - **Failure visibility:** Jobs that still fail analysis are excluded from automatic scoring but included in the email's manual-review section with their original LinkedIn links.
-- **Fail-closed reporting:** The run ledger requires exactly one selected, rejected, or failed outcome for every expected new job ID. Missing, duplicate, or unexpected outcomes stop report generation instead of silently dropping jobs.
+- **Fail-closed reporting:** The run ledger requires exactly one selected, rejected, held, or failed outcome per expected job ID. Missing, duplicate, or unexpected outcomes stop reporting.
+- **Controlled re-evaluation:** `REASSESS_EXISTING` in `De-duplicate Jobs in DB` defaults to `false`. Enabling it explicitly re-evaluates existing IDs and can resend qualifying jobs. Use an isolated copy/test recipient for calibration; do not delete the database to force a replay.
+
+## Offline regression checks
+
+Python 3.10+ and Node.js are required for the full test suite:
+
+```bash
+python3 -m unittest discover -s tests -v
+node tests/workflow_policy_checks.js
+```
+
+The checks cover personalization, prompt mirrors, typed source facts, score arithmetic, independent gates, source containment, posting bounds, routing, and report accounting. The Node harness executes trusted local Code-node implementations; do not use it on untrusted workflow exports. They do not contact n8n, AI/Tavily services, PostgreSQL, or SMTP. Live import compatibility, deployment security controls, and model interpretation still require the inactive controlled test above.
 
 ## Customization
 
