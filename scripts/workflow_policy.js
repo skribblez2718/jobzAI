@@ -67,12 +67,14 @@ function fitSourceMap(envelope) {
 function fitEvidence(records, envelope, label, required = true) {
   if (!Array.isArray(records) || records.length > 5 || (required && records.length === 0)) throw new Error(`${label}: missing or excessive source evidence.`);
   const sources = fitSourceMap(envelope);
-  for (const record of records) {
-    fitExact(record, ['source_url','quote'], label);
-    fitText(record.source_url, 2048, `${label}.source_url`);
-    fitText(record.quote, 1500, `${label}.quote`);
+  for (const [index, record] of records.entries()) {
+    const field = `${label}[${index}]`;
+    fitExact(record, ['source_url','quote'], field);
+    fitText(record.source_url, 2048, `${field}.source_url`);
+    fitText(record.quote, 1500, `${field}.quote`);
     const source = sources.get(record.source_url.replace(/\/$/, ''));
-    if (!source || !source.some(chunk => chunk.includes(fitNormalize(record.quote)))) throw new Error(`${label}: excerpt is not present in the supplied source.`);
+    if (!source) throw new Error(`${field}: excerpt source URL was not supplied; copy its supplied URL exactly.`);
+    if (!source.some(chunk => chunk.includes(fitNormalize(record.quote)))) throw new Error(`${field}: excerpt is not present in the supplied source; copy one contiguous passage verbatim, without joining fields or bullets.`);
   }
 }
 function fitEligibility(preferences, policy) {
@@ -95,12 +97,29 @@ function fitCompensation(preferences, policy) {
   const comparable = c.ranges.filter(r => r.currency === policy.target_currency && r.basis === policy.target_basis && r.period === 'annual' && r.applicability === 'applicable');
   if (!comparable.length) return {rating: null, maximum: null, below_target: false};
   const signatures = new Set(comparable.map(r => JSON.stringify([r.minimum,r.maximum])));
-  if (signatures.size !== 1) throw new Error('Conflicting applicable pay ranges must be marked conflicting, not known.');
-  const r = comparable[0];
+  let r = comparable[0];
+  if (signatures.size !== 1) {
+    // A complete range may corroborate matching one-sided statements in the same
+    // geography. Distinct complete ranges (even overlapping) are not merged.
+    const complete = comparable.filter(row => row.minimum !== null && row.maximum !== null);
+    const completeSignatures = new Set(complete.map(row => JSON.stringify([row.minimum,row.maximum])));
+    const anchor = complete[0];
+    const compatible = anchor && completeSignatures.size === 1 && comparable.every(row =>
+      fitNormalize(row.location_scope).toLowerCase() === fitNormalize(anchor.location_scope).toLowerCase() &&
+      (row.minimum === null || row.minimum === anchor.minimum) &&
+      (row.maximum === null || row.maximum === anchor.maximum));
+    if (!compatible) return {rating:null, maximum:null, below_target:false, conflicting:true};
+    r = anchor;
+  }
   if (r.maximum !== null && r.maximum < policy.target_amount) return {rating: 1, maximum: r.maximum, below_target: true};
   if (r.minimum !== null && r.minimum >= policy.target_amount) return {rating: 5, maximum: r.maximum, below_target: false};
   if (r.maximum !== null && r.maximum >= policy.target_amount) return {rating: 4, maximum: r.maximum, below_target: false};
   return {rating: null, maximum: r.maximum, below_target: false};
+}
+// Call only after fitValidateFacts: uncertainty cannot bypass source/type checks.
+function fitNormalizeCompensation(compensation, policy) {
+  if (!fitCompensation({compensation}, policy).conflicting) return compensation;
+  return {...compensation, status:'conflicting', note:'Unresolved applicable comparable pay ranges; no salary rating or salary veto. ' + compensation.note.slice(0, 700)};
 }
 function fitValidateFacts(preferences, envelope) {
   const p = fitReadPolicy(envelope);
@@ -158,19 +177,19 @@ function fitValidateSkills(skills, envelope) {
     return;
   }
   const seen = new Set();
-  for (const r of skills.requirements) {
+  for (const [index, r] of skills.requirements.entries()) {
     fitExact(r, ['requirement','priority','explicitness','outcome','central','mandatory_credential','resume_evidence','resume_evidence_quotes','posting_evidence','hard_condition'], 'requirement');
     fitText(r.requirement, 300, 'requirement');
     fitText(r.resume_evidence, 800, 'resume_evidence');
     fitText(r.posting_evidence, 1500, 'posting_evidence');
-    if (!fitNormalize(fitPostingText(envelope)).includes(fitNormalize(r.posting_evidence))) throw new Error('Requirement excerpt is not present in posting.');
+    if (!fitNormalize(fitPostingText(envelope)).includes(fitNormalize(r.posting_evidence))) throw new Error(`requirement[${index}].posting_evidence: Requirement excerpt is not present in posting; copy one contiguous passage verbatim.`);
     fitEnum(r.priority, ['MUST','NICE'], 'priority');
     fitEnum(r.explicitness, ['EXPLICIT','IMPLICIT'], 'explicitness');
     fitEnum(r.outcome, ['DIRECT','TRANSFERABLE','GAP'], 'outcome');
     if (!Array.isArray(r.resume_evidence_quotes) || r.resume_evidence_quotes.length > 3 || (r.outcome !== 'GAP' && !r.resume_evidence_quotes.length)) throw new Error('Direct/transferable matches require bounded resume excerpts.');
     for (const quote of r.resume_evidence_quotes) {
       fitText(quote, 1500, 'resume_evidence_quotes');
-      if (!fitNormalize(envelope.resume).includes(fitNormalize(quote))) throw new Error('Resume excerpt is not present in the supplied resume.');
+      if (!fitNormalize(envelope.resume).includes(fitNormalize(quote))) throw new Error(`requirement[${index}].resume_evidence_quotes: Resume excerpt is not present in the supplied resume; copy a short contiguous passage verbatim.`);
     }
     fitEnum(r.hard_condition, ['none','credential','license','clearance','strict_experience_minimum'], 'hard_condition');
     if (typeof r.central !== 'boolean' || typeof r.mandatory_credential !== 'boolean') throw new Error('Invalid requirement booleans.');
@@ -181,14 +200,25 @@ function fitValidateSkills(skills, envelope) {
     if (seen.has(key)) throw new Error('Duplicate requirement.');
     seen.add(key);
   }
-  const total = skills.requirements.reduce((sum, r) => sum + (r.priority === 'MUST' ? 2 : 1), 0);
-  const earned = skills.requirements.reduce((sum, r) => sum + (r.priority === 'MUST' ? 2 : 1) * (r.outcome === 'DIRECT' ? 1 : r.outcome === 'TRANSFERABLE' ? .5 : 0), 0);
+  const expected = fitSkillRating(skills.requirements);
+  if (skills.skill_rating !== expected) throw new Error(`Skill rating must be ${expected} from coverage and caps.`);
+}
+function fitSkillRating(requirements) {
+  if (!Array.isArray(requirements) || requirements.length > 80 || requirements.some(r => !fitObject(r))) throw new Error('Invalid requirements list.');
+  if (!requirements.length) return 1;
+  const total = requirements.reduce((sum, r) => sum + (r.priority === 'MUST' ? 2 : 1), 0);
+  const earned = requirements.reduce((sum, r) => sum + (r.priority === 'MUST' ? 2 : 1) * (r.outcome === 'DIRECT' ? 1 : r.outcome === 'TRANSFERABLE' ? .5 : 0), 0);
   const coverage = earned / total;
   const baseline = coverage >= .8 ? 5 : coverage >= .6 ? 4 : coverage >= .4 ? 3 : coverage >= .2 ? 2 : 1;
-  const gaps = skills.requirements.filter(r => r.central && r.outcome === 'GAP').length;
-  const credentialGap = skills.requirements.some(r => r.mandatory_credential && r.outcome === 'GAP');
-  const expected = Math.min(baseline, credentialGap || gaps >= 2 ? 2 : gaps === 1 ? 3 : 5);
-  if (skills.skill_rating !== expected) throw new Error(`Skill rating must be ${expected} from coverage and caps.`);
+  const gaps = requirements.filter(r => r.central && r.outcome === 'GAP').length;
+  const credentialGap = requirements.some(r => r.mandatory_credential && r.outcome === 'GAP');
+  return Math.min(baseline, credentialGap || gaps >= 2 ? 2 : gaps === 1 ? 3 : 5);
+}
+function fitBuildSkills(data, envelope) {
+  fitExact(data, ['requirements','limited_data_reason','evidence_quality'], 'skill model output');
+  const skills = {...data, skill_rating:fitSkillRating(data.requirements)};
+  fitValidateSkills(skills, envelope);
+  return skills;
 }
 function fitSelection(envelope, dimensions) {
   const p = fitReadPolicy(envelope), pref = envelope.results?.preferences, skills = envelope.results?.skills;
@@ -229,5 +259,40 @@ function fitValidateOverall(data, envelope) {
   return selection;
 }
 
+function fitOverallContext(envelope) {
+  const pref = envelope.results?.preferences, skills = envelope.results?.skills;
+  if (!pref || !skills) throw new Error('Missing validated preference/skill results.');
+  const eligibility = fitValidateFacts(pref, envelope);
+  fitValidateSkills({requirements:skills.requirements, limited_data_reason:skills.limited_data_reason, skill_rating:skills.skill_rating, evidence_quality:skills.evidence_quality}, envelope);
+  if (![pref.preference_matches,pref.preference_misses,pref.red_flags].every(Array.isArray) || [...pref.preference_matches,...pref.preference_misses].some(x => typeof x !== 'string') || pref.red_flags.some(x => !fitObject(x))) throw new Error('Invalid validated preference evidence.');
+  const entries = [...pref.preference_matches,...pref.preference_misses];
+  const selection = fitSelection(envelope, {employee_satisfaction:null,salary_competitiveness:null,remote_work_flexibility:null,skills_alignment:skills.skill_rating,cultural_fit:null});
+  // Ranking is not known until the subjective dimensions are supplied.
+  return {eligibility_state:eligibility.state, reason_codes:selection.reason_codes.filter(x => x !== 'ranking_threshold'), review_codes:selection.review_codes,
+    salary_competitiveness:selection.compensation.rating, skills_alignment:skills.skill_rating,
+    employee_satisfaction_supported:entries.some(x => x.startsWith('[SATISFACTION]')) || pref.red_flags.some(x => x.category === 'satisfaction'),
+    cultural_fit_supported:entries.some(x => /^\[(DOMAIN|DREAM_ROLE|COLLABORATION|GROWTH|CULTURE)\]/.test(x))};
+}
+function fitBuildOverall(data, envelope) {
+  const subjective = ['employee_satisfaction','remote_work_flexibility','cultural_fit'];
+  fitExact(data, subjective, 'overall model output');
+  for (const key of subjective) if (data[key] !== null) fitNumber(data[key], 1, 5, key, true);
+  const context = fitOverallContext(envelope);
+  const result = {determination:'no', employee_satisfaction:context.employee_satisfaction_supported ? data.employee_satisfaction : null,
+    salary_competitiveness:context.salary_competitiveness,
+    remote_work_flexibility:context.eligibility_state === 'confirmed' ? data.remote_work_flexibility : null,
+    skills_alignment:context.skills_alignment, cultural_fit:context.cultural_fit_supported ? data.cultural_fit : null, explanation:''};
+  const selection = fitSelection(envelope, result);
+  result.determination = selection.determination;
+  const descriptions = {work_arrangement_mismatch:'required work arrangement not met',work_arrangement_failed:'work arrangement failed',work_location_ineligible:'work location ineligible',travel_exceeds_limit:'mandatory travel exceeds cap',skill_floor:'skills below required floor',mandatory_qualification_unmet:'mandatory qualification not evidenced',salary_below_target:'published comparable pay below target',posting_closed:'posting explicitly closed',ranking_threshold:'fit score below threshold',work_arrangement_unverified:'work arrangement unverified',work_location_unverified:'work location unverified',travel_necessity_unverified:'travel necessity unverified',travel_frequency_unverified:'travel frequency unverified',qualification_evidence_incomplete:'qualification evidence incomplete'};
+  const conditions = selection.state === 'rejected' ? selection.reason_codes : selection.review_codes;
+  const lead = selection.state === 'selected' ? `Eligible; skills ${result.skills_alignment}/5 meet floor` :
+    `${selection.state === 'held' ? 'Verify' : 'Not selected'}: ${conditions.slice(0,2).map(x => descriptions[x]).join('; ')}`;
+  const pay = selection.compensation.below_target ? 'Pay below target' : result.salary_competitiveness === null ? 'Pay unknown/noncomparable' : 'Published pay reaches target; offer not guaranteed';
+  result.explanation = `${lead} • ${pay} • Fit ${selection.score}/5`;
+  fitValidateOverall(result, envelope);
+  return result;
+}
+
 // Node.js test interface; omitted when embedded in n8n Code nodes.
-module.exports = { fitNormalizeResearch,FIT_DIMENSIONS, FIT_WEIGHTS, fitReadPolicy, fitValidateFacts, fitValidateSkills, fitEligibility, fitCompensation, fitSelection, fitValidateOverall};
+module.exports = { fitNormalizeResearch,FIT_DIMENSIONS, FIT_WEIGHTS, fitReadPolicy, fitValidateFacts, fitValidateSkills, fitSkillRating, fitBuildSkills, fitEligibility, fitCompensation, fitNormalizeCompensation, fitSelection, fitValidateOverall, fitOverallContext, fitBuildOverall};

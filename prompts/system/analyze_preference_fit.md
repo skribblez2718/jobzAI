@@ -39,7 +39,7 @@ Use `policy.required_work_arrangement` and the requirements in [YOUR_WORK_ARRANG
 
 Record travel separately. No travel mention is `not_stated`, null frequency, empty evidence, and is acceptable: never reject/hold or invent a zero-trip promise for unposted travel. Quantified mandatory trips at or below `policy.max_annual_trips` are acceptable; above it fails. Optional travel is not a hard condition. Above-limit travel of unclear necessity is held for verification. A quarterly trip is four/year, monthly twelve; never convert percentages/days into trips. Explicit unquantified mandatory/unclear-necessity travel needs review, not a claim it exceeds the limit.
 
-Exactly one consolidated eligibility entry is required: `[ELIGIBILITY] Confirmed:` in matches when configured arrangement/location conditions are established and travel is acceptable or unposted; `[ELIGIBILITY] Failed:` in misses for a hard mismatch; `[ELIGIBILITY] Unverified:` in potentials for unresolved mandatory arrangement/location or explicit travel frequency. Failed/unverified gets rating 0 and no confirmed preference-dimension matches. Unknown salary/reviews do not enter eligibility.
+Exactly one consolidated eligibility entry is required: `[ELIGIBILITY] Confirmed:` in matches when configured arrangement/location conditions are established and travel is acceptable or unposted; `[ELIGIBILITY] Failed:` in misses for a hard mismatch; `[ELIGIBILITY] Unverified:` in potentials for unresolved mandatory arrangement/location or explicit travel frequency. Failed/unverified gets rating 0 in code, but independently supported work-content matches/misses must still be recorded. Interest evidence does not override eligibility. Unknown salary/reviews do not enter eligibility.
 
 ## Four scored preference dimensions
 
@@ -74,7 +74,9 @@ Allowed categories: `salary`, `satisfaction`, `layoffs_or_reorganization`, `fina
 
 Omit flags that cannot meet a threshold; report bounded concerns in the labeled evidence arrays instead. Do not split one event into multiple flags to increase the cap. The validator derives severity; do not emit `derived_severity` yourself.
 
-## Preference rating
+## Preference rating — code-owned, do not emit
+
+Do not calculate or return `preferences_rating`. Code derives it from validated eligibility, confirmed dimension labels, and red-flag caps. The following describes that calculation, not an output field.
 
 For confirmed configured arrangement/location eligibility, baseline = 1 + the number of confirmed labels among `[DOMAIN]`, `[COLLABORATION]`, `[GROWTH]`, `[DREAM_ROLE]`:
 
@@ -95,7 +97,7 @@ Identify posting evidence as `Posting:`. For research evidence include the suppl
 
 Return exactly the parser's analytical keys:
 
-`company_name`, `position`, `salary`, `location`, `preference_matches`, `preference_misses`, `potential_preference_matches`, `preferences_rating`, `references`, `years_of_experience`, `red_flags`, `eligibility`, `travel`, `compensation`, `availability`.
+`company_name`, `position`, `salary`, `location`, `preference_matches`, `preference_misses`, `potential_preference_matches`, `references`, `years_of_experience`, `red_flags`, `eligibility`, `travel`, `compensation`, `availability`.
 
 `years_of_experience` describes the posting's experience requirement, not the candidate's tenure. The connected parser controls types, ranges, and additional properties. Properly quote/escape all JSON strings; do not invent substitute fields.
 
@@ -128,3 +130,11 @@ Source-excerpt arrays contain at most five objects; quotes at most 1500 characte
 ## Source limitations
 
 Research is bounded before analysis. An omitted or truncated research field is not a complete source; do not infer favorable or unfavorable missing details. Search `answer` is a generated summary, not independent primary evidence. Cite only supplied excerpts with the matching supplied URL. No excerpt-containment check establishes semantic truth.
+
+## Exact-source checks
+
+Before returning a quote, locate that exact short contiguous passage in one supplied source field. Preserve case and punctuation; only whitespace may differ. Never concatenate title/location/posting fields or separated bullets into one quote. Use separate evidence objects when two fields jointly establish a fact. Copy the URL supplied with that source, not a guessed canonicalization. In particular, do not turn metadata `Remote` and `US` into an invented quote `Remote (US)`. Quote each supplied field separately. Missing source text remains unknown; do not fabricate a quotation to avoid a hold.
+
+## Pay-range reconciliation
+
+Duplicate ranges are harmless. A complete range and a one-sided statement with the same stated endpoint and geographic scope can corroborate each other. Preserve separate records and evidence. Different full ranges, different geographic scopes with unequal bounds, or partial statements that cannot be safely resolved remain conflicting. Code conservatively downgrades unresolved comparable numeric conflicts to `conflicting`; it never selects the largest range or treats ambiguous pay as a salary veto. Never change extracted numbers to make ranges agree.

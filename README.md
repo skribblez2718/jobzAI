@@ -10,15 +10,15 @@ The current implementation is split into one coordinating workflow and three foc
 |---|---|
 | `Job Searcher.json` | Reads RSS feeds, canonicalizes LinkedIn job IDs, removes duplicates, performs company research, coordinates analysis, persists qualifying jobs, and generates email reports. |
 | `Job Searcher - Preference Analysis.json` | Evaluates location eligibility, compensation, culture, growth, domain alignment, and other candidate preferences using posting and research evidence. |
-| `Job Searcher - Skill Analysis.json` | Compares the posting's canonical requirements with résumé evidence and calculates a validated skill-fit rating. |
-| `Job Searcher - Overall Analysis.json` | Combines validated preference and skill evidence into weighted dimensions and the final apply/no-apply determination. |
+| `Job Searcher - Skill Analysis.json` | Classifies canonical requirements against résumé evidence; code calculates and validates skill fit. |
+| `Job Searcher - Overall Analysis.json` | Assesses three subjective dimensions; code derives salary, copies skills, and calculates the final determination and explanation. |
 
 ### How the workflows interact
 
 1. The main workflow combines the configured LinkedIn RSS feeds and extracts one canonical numeric LinkedIn `job_id` per posting.
 2. Existing database IDs and duplicate feed entries are removed before analysis.
 3. New jobs are processed one at a time. Tavily Extract attempts to retrieve the full posting at its canonical LinkedIn URL; extraction failure falls back to feed text. Company research is gathered separately. The main workflow builds an envelope containing bounded source material, résumé, validated candidate policy, and run metadata.
-4. Preference, Skill, and Overall Analysis run synchronously in that order. Each child validates structured output and supplied-source excerpts. Parser auto-repair is disabled: format-only repair must not invent missing selection facts. The full-context model fallback and whole-stage retries remain.
+4. Preference, Skill, and Overall Analysis run synchronously in that order. Each child validates structured output and supplied-source excerpts. Parser auto-fix is disabled. A chain/parser or validator error receives one full-context correction attempt with bounded error feedback; a second failure stops the child. The parent does not restart the entire child. Existing model fallbacks remain, so a chain attempt can still invoke both configured models.
 5. Qualification and eligibility gates run before ranking. Only eligible jobs meeting the default skill floor of `4` and normalized score threshold of `3.5` are upserted into PostgreSQL. Higher pay or employer appeal cannot rescue a failed prerequisite.
 6. Every job reaches one selected, rejected, held, or failed outcome. Only the current execution's selected IDs are queried and ranked, up to the email-report limit (20 by default). Unresolved eligibility/evidence and execution failures have separate review sections.
 
@@ -42,7 +42,7 @@ For installation, first use the [setup instructions](#setup) to generate private
 
 When the current run selects one or more jobs, JobzAI sends a responsive HTML report with a run summary followed by one card per selected job. The default cap is 20 cards, but it is configurable: change `REPORT_LIMIT` at the top of the `Build Run Ledger` Code node. That value is validated, passed as a parameter to `Select Top Jobs`, used for report accounting, and shown in the omission notice, so no other node needs to be edited. Increasing it can produce much larger emails and database results; test the resulting message with your email provider. The separate manual-review lists retain their own 20-item display cap.
 
-Each job card contains the direct LinkedIn link, role details, fit ratings, dimension scores, evidence, preference findings, skill findings, policy version, and travel status. Qualification requirements, compensation ranges, source excerpts, and résumé digest remain in the execution envelope/current-run metadata; this update does not add database columns. Jobs held for evidence verification are distinguished from rejected jobs and from analyses that fail after three attempts.
+Each job card contains the direct LinkedIn link, role details, fit ratings, dimension scores, evidence, preference findings, skill findings, policy version, and travel status. Qualification requirements, compensation ranges, source excerpts, and résumé digest remain in the execution envelope/current-run metadata; this update does not add database columns. Jobs held for evidence verification are distinguished from rejected jobs and from analyses that fail after the bounded analysis/correction path.
 
 The report follows this structure:
 
@@ -240,7 +240,7 @@ For the fewest changes, use OpenAI or an OpenAI-compatible provider:
 4. Confirm that the models support chat completions and reliably follow strict structured-JSON instructions. The workflow validators reject malformed or contract-breaking output.
 5. Assign the credential and model selection to both model nodes in each analysis workflow.
 
-You may instead replace the included model nodes with n8n's provider-specific chat-model nodes. Preserve both `ai_languageModel` connections into each Basic LLM Chain. Structured Output Parser auto-fix is disabled and has no repair-model connection. Provider-specific credentials, model options, context limits, and structured-output behavior differ, so replacing the nodes may require additional prompt, parser, or retry changes. Run all three analysis workflows end to end after a replacement.
+You may instead replace the included model nodes with n8n's provider-specific chat-model nodes. Preserve both `ai_languageModel` connections into each Basic LLM Chain and its error-output correction path. Structured Output Parser auto-fix is disabled and has no repair-model connection. Provider-specific credentials, model options, context limits, and structured-output behavior differ, so replacing the nodes may require additional prompt, parser, or retry changes. Run all three analysis workflows end to end after a replacement.
 
 The exported primary and fallback nodes use the same model ID within each workflow. “Fallback” means a secondary chain attempt, not independent evidence or provider-level redundancy. Configure and test a distinct compatible fallback model if you want that additional resilience.
 
@@ -339,6 +339,14 @@ Then import `Job Searcher.json` from the same directory.
 
 All four public and generated exports are inactive and intentionally omit credentials and source-instance workflow IDs. The main workflow's three child IDs are intentionally blank. Importing files alone does not connect them: select each imported child in step 4 and save. Cached child names are labels, not executable IDs.
 
+### Updating an existing installation
+
+Replace all four workflows together; their raw model-output schemas have changed. Back up the installation's current exports first. Wait for the current batch to finish or stop it before importing—do not mix old and new child contracts mid-run.
+
+Regenerate private workflow copies from the updated public templates, using a new ignored output directory as described in `data/README.md`. Import the three analysis children first, then the main workflow. Reselect the imported children in the main workflow's Execute nodes, verify credentials/model selections and installation-specific settings, and save/publish the updated versions. Importing a duplicate workflow does not make an existing parent call that duplicate automatically.
+
+No database migration or separate Markdown prompt upload is required for this reliability update. Prompts, schemas, validators, and correction routing are embedded in the JSON exports. Keep scheduling disabled until a small controlled run and representative failed-case replays pass. Offline tests do not establish a new provider failure rate or semantic classification accuracy.
+
 ### 4. Connect workflows and configure the web-interface values
 
 1. In `Job Searcher`, open each Execute Sub-workflow node and select its imported child by name:
@@ -435,9 +443,13 @@ See `postgres/bootstrap_db.sql` for the complete schema definition.
 - **Eligibility before score:** `If Selection Eligible` consumes the calculator's validated Boolean, not a score-only shortcut. Failed arrangement/location conditions, explicit closure, sufficiently evidenced non-substitutable qualification gaps, below-floor skills, or a comparable published annual maximum below target reject. Unresolved mandatory conditions and incomplete qualifications are held.
 - **Travel:** Unposted travel never causes rejection or a hold. Required quantified trips above the configured annual maximum reject; optional travel is not a hard gate. Unknown required frequency or unclear necessity of above-limit travel needs review.
 - **Unknown optional evidence:** Missing/unverified/conflicting/noncomparable salary and missing employee sentiment do not independently block selection. Unknown dimension values are null and excluded from the denominator.
-- **Qualification-first ranking:** Defaults are skill floor `4`, rounded score threshold `3.5`, and integer weights skills 60, salary 15, arrangement 10, culture/work content 10, satisfaction 5. Prompt anchors, parser schemas, and `scripts/workflow_policy.js` must change together. The helper is embedded identically in five Code nodes; tests reject drift.
+- **Code-owned arithmetic:** Preference models return fourteen evidence fields, without `preferences_rating`. Skill models return `requirements`, `limited_data_reason`, and `evidence_quality`, without `skill_rating`. Overall models return only `employee_satisfaction`, `remote_work_flexibility`, and `cultural_fit`. Code derives preference/skill ratings, salary rating, final determination, score, and explanation. Attached results retain their existing downstream fields.
+- **Qualification-first ranking:** Defaults are skill floor `4`, rounded score threshold `3.5`, and integer weights skills 60, salary 15, arrangement 10, culture/work content 10, satisfaction 5. Prompt anchors, parser schemas, and `scripts/workflow_policy.js` must change together. The shared helper is embedded identically in policy-bearing Code nodes; tests reject drift.
+- **Consistent optional evidence:** Only accepted preference matches/misses support cultural scores, and satisfaction needs its own evidence. Potential claims do not count. Unsupported optional scores are excluded as null. Independently established work-content facts remain available even when eligibility is unresolved; they cannot override a hold or rejection.
+- **Pay reconciliation:** Duplicates and same-geography complete ranges corroborated by matching one-sided bounds remain comparable. Different complete ranges, unequal regional bounds, or unresolved partial statements become conflicting rather than selecting the largest figure. Exact source/type checks run before normalization; ambiguous pay remains nonblocking.
 - **Current-run report cap:** `REPORT_LIMIT` at the top of `Build Run Ledger` controls how many ranked, current-execution jobs can appear in the selected-jobs email. It defaults to `20`; the workflow validates and propagates it to the parameterized PostgreSQL query and report accounting.
-- **Retries:** Search and each analysis sub-workflow use up to three attempts; posting extraction uses up to two. The existing two-second retry delay remains.
+- **Retries:** Search keeps up to three attempts and posting extraction up to two. Each analysis child permits one initial chain invocation and at most one correction with the validation error and original sources. The host-owned correction-node execution index enforces that limit. Parent analysis retries are disabled. Configured primary/fallback models and provider SDK transport retries can add requests within a chain invocation; this is not a two-request provider quota.
+- **Diagnostics:** Failure outcomes retain bounded nested error messages rather than `[object Object]`. Validation errors identify the failed evidence field without echoing its quote. Correction context also includes a prior-answer excerpt capped at 8,000 characters when available; it is not source evidence. Full source/resume payloads are not dumped to console logs.
 - **Failure visibility:** Jobs that still fail analysis are excluded from automatic scoring but included in the email's manual-review section with their original LinkedIn links.
 - **Fail-closed reporting:** The run ledger requires exactly one selected, rejected, held, or failed outcome per expected job ID. Missing, duplicate, or unexpected outcomes stop reporting.
 - **Controlled re-evaluation:** `REASSESS_EXISTING` in `De-duplicate Jobs in DB` defaults to `false`. Enabling it explicitly re-evaluates existing IDs and can resend qualifying jobs. Use an isolated copy/test recipient for calibration; do not delete the database to force a replay.
@@ -451,7 +463,7 @@ python3 -m unittest discover -s tests -v
 node tests/workflow_policy_checks.js
 ```
 
-The checks cover personalization, prompt mirrors, typed source facts, score arithmetic, independent gates, source containment, posting bounds, routing, and report accounting. The Node harness executes trusted local Code-node implementations; do not use it on untrusted workflow exports. They do not contact n8n, AI/Tavily services, PostgreSQL, or SMTP. Live import compatibility, deployment security controls, and model interpretation still require the inactive controlled test above.
+The checks cover personalization, prompt mirrors, typed source facts, score arithmetic, independent gates, source containment, posting bounds, routing, and report accounting. Correction-path tests walk the exported graph with actual Code-node implementations and mocked chain/parser results, including corrected quotes and repeated failure; they do not execute n8n or its native parser. The Node harness executes trusted local Code-node implementations; do not use it on untrusted workflow exports. They do not contact n8n, AI/Tavily services, PostgreSQL, or SMTP. Live import compatibility, deployment security controls, and model interpretation still require the inactive controlled test above.
 
 ## Customization
 

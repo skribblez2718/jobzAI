@@ -274,25 +274,25 @@ SOURCE_FIELD_CONTRACTS: tuple[SourceFieldContract, ...] = (
         "Job Searcher.json",
         "Build Analysis Envelope",
         ("parameters", "jsCode"),
-        "a92fa377314bd14cbe04987cd54b27cd0bd8b6dc2ee938d7ff077962f007f3fd",
+        "3902f20972e032907eba98a78538a331ed41dd8a99a164a9b18026da6ca1957b",
     ),
     SourceFieldContract(
         "Job Searcher - Preference Analysis.json",
         "Preference Analysis Chain",
         ("parameters", "messages", "messageValues", 0, "message"),
-        "4d867e52125694fa7400dc39025254131e4016b1db32ff4683567df378f8c4d5",
+        "6a0b2513db92d80bf21b1bdad5ed8b11a21ef8945d4b64b5e12108e169e990ae",
     ),
     SourceFieldContract(
         "Job Searcher - Overall Analysis.json",
         "Overall Analysis Chain",
         ("parameters", "text"),
-        "e88ce6a037cd305ce2bfe42243d63afe6c3cb495799fbe0f517077fcac481581",
+        "adbffa5d5454322feae7f9df8ddce0e63eb9bb0ba19f91518c4b07ce307853e5",
     ),
     SourceFieldContract(
         "Job Searcher - Overall Analysis.json",
         "Overall Analysis Chain",
         ("parameters", "messages", "messageValues", 0, "message"),
-        "577e2c0e686d83e706dfa8313a18b40ec39db7c0fd503fd90cb0a3b2f98facbf",
+        "977b1f34ef21675b0e3e5e4b268efb7ae81cb9eb06ec9ea73e2acbacfa681356",
     ),
 )
 
